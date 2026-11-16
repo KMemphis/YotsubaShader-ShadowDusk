@@ -196,3 +196,55 @@ jobs:
           path: out/*
           if-no-files-found: error
           retention-days: 30
+
+  build-linux-arm64:
+    name: Build linux-arm64 libdxcompiler.so
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 240
+    steps:
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang cmake ninja-build python3 git libxml2-dev
+      - name: Fetch pinned DXC source
+        run: |
+          git init dxc-src
+          git -C dxc-src remote add origin https://github.com/microsoft/DirectXShaderCompiler.git
+          git -C dxc-src fetch --depth 1 origin "$DXC_COMMIT"
+          git -C dxc-src -c advice.detachedHead=false checkout FETCH_HEAD
+          git -C dxc-src submodule update --init --recursive --depth 1 \
+            external/SPIRV-Headers external/SPIRV-Tools external/DirectX-Headers
+          for pair in \
+            "external/SPIRV-Headers:$SPIRV_HEADERS_COMMIT" \
+            "external/SPIRV-Tools:$SPIRV_TOOLS_COMMIT" \
+            "external/DirectX-Headers:$DIRECTX_HEADERS_COMMIT"; do
+            path="${pair%%:*}"; want="${pair##*:}"
+            test "$(git -C "dxc-src/$path" rev-parse HEAD)" = "$want"
+          done
+      - name: Build pinned compiler with SPIR-V support
+        run: |
+          cmake -G Ninja -S dxc-src -B build \
+            -DCMAKE_BUILD_TYPE=Release -DENABLE_SPIRV_CODEGEN=ON \
+            -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF \
+            -DHLSL_INCLUDE_TESTS=OFF -DSPIRV_BUILD_TESTS=OFF \
+            -DLLVM_INCLUDE_DOCS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -C dxc-src/cmake/caches/PredefinedParams.cmake
+          ninja -C build -j2 dxcompiler dxc
+      - name: Smoke SPIR-V and stage native identity
+        run: |
+          printf 'float4 main() : SV_Target { return float4(1,0,0,1); }\n' > smoke.hlsl
+          ./build/bin/dxc -T ps_6_0 -E main -spirv -Fo smoke.spv smoke.hlsl
+          test "$(od -An -tx1 -N4 smoke.spv | tr -d ' \n')" = 03022307
+          readelf -h build/lib/libdxcompiler.so | grep -q AArch64
+          mkdir -p out
+          cp build/lib/libdxcompiler.so out/
+          cp dxc-src/LICENSE.TXT out/LICENSE-DXC.TXT
+          sha256sum out/libdxcompiler.so | tee out/libdxcompiler.so.sha256
+          readelf -n out/libdxcompiler.so | sed -n 's/.*Build ID: //p' > out/libdxcompiler.so.build-id
+          test -s out/libdxcompiler.so.build-id
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dxc-${{ env.DXC_VERSION }}-linux-arm64
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30

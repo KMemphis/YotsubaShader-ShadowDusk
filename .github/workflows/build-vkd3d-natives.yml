@@ -146,8 +146,14 @@ jobs:
           retention-days: 30
 
   build-linux:
-    name: Build linux-x64 .so (glibc 2.31 baseline)
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.rid }} .so (glibc 2.31 baseline)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64, os: ubuntu-24.04 }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm }
     # Ubuntu 20.04 container = glibc 2.31, the oldest supported baseline. Matches the
     # recipe in tools/restore.sh (verified on 24.04 in Phase 39) but built old enough
     # to honor the 20.04+ support claim.
@@ -227,7 +233,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: vkd3d-${{ env.VKD3D_VERSION }}-linux-x64
+          name: vkd3d-${{ env.VKD3D_VERSION }}-${{ matrix.rid }}
           path: out/*
           if-no-files-found: error
           retention-days: 30
@@ -319,6 +325,61 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: vkd3d-${{ env.VKD3D_VERSION }}-win-x64
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+
+  build-windows-arm64:
+    name: Build win-arm64 dll (MSYS2 CLANGARM64)
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANGARM64
+          update: true
+          install: >-
+            make
+            bison
+            flex
+            tar
+            xz
+            curl
+            perl
+            perl-JSON
+            mingw-w64-clang-aarch64-clang
+            mingw-w64-clang-aarch64-pkgconf
+            mingw-w64-clang-aarch64-vulkan-headers
+            mingw-w64-clang-aarch64-spirv-headers
+      - uses: actions/checkout@v7
+      - name: Download and verify pinned source
+        run: |
+          curl -fsSLo vkd3d.tar.xz "$VKD3D_TARBALL_URL"
+          echo "$VKD3D_TARBALL_SHA256  vkd3d.tar.xz" | sha256sum -c -
+          tar xf vkd3d.tar.xz
+      - name: Build and smoke libvkd3d-shader
+        working-directory: ${{ env.VKD3D_SRC }}
+        run: |
+          ./configure CFLAGS='-O2' SONAME_LIBVULKAN=vulkan-1.dll \
+            LDFLAGS="-static-libgcc -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic"
+          make include/private/vkd3d_version.h
+          make -j"$(nproc)" libvkd3d-shader.la vkd3d-compiler.exe
+          bash "$GITHUB_WORKSPACE/.github/scripts/vkd3d-smoke.sh" ./vkd3d-compiler.exe
+          objdump -p .libs/libvkd3d-shader-1.dll | grep 'DLL Name'
+          bad=$(objdump -p .libs/libvkd3d-shader-1.dll | awk '/DLL Name/{print tolower($3)}' \
+                | grep -E '^(libgcc|libwinpthread|msys-|libstdc)' || true)
+          test -z "$bad"
+      - name: Stage pinned artifact and hash
+        run: |
+          mkdir -p out
+          cp "$VKD3D_SRC/.libs/libvkd3d-shader-1.dll" out/
+          sha256sum out/libvkd3d-shader-1.dll | tee out/libvkd3d-shader-1.dll.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vkd3d-${{ env.VKD3D_VERSION }}-win-arm64
           path: out/*
           if-no-files-found: error
           retention-days: 30
