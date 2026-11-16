@@ -10,7 +10,8 @@
          dependency (the cross-platform SPIR-V to GLSL native) flows transitively to
          consumers of ShadowDusk.Compiler. -->
     <IsPackable>true</IsPackable>
-    <PackageId>YotsubaShader.ShadowDusk.GLSL</PackageId>
+    <PackageId Condition="'$(UseYotsubaPackageIds)' != 'true'">ShadowDusk.GLSL</PackageId>
+    <PackageId Condition="'$(UseYotsubaPackageIds)' == 'true'">YotsubaShader.ShadowDusk.GLSL</PackageId>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Description>ShadowDusk GLSL back-end: SPIR-V to GLSL transpilation via SPIRV-Cross and the MonoGame/MojoShader GLSL dialect rewriter. Part of the ShadowDusk.Compiler cross-platform MonoGame/KNI shader compiler.</Description>
@@ -53,6 +54,6 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
     <!-- Issue #350: the build-time Silk.NET.SPIRV.Cross.Native version check (warning SD0226),
          buildTransitive so it also runs for ShadowDusk.Compiler / ShadowDusk.ContentPipeline consumers. -->
-    <None Include="buildTransitive\ShadowDusk.GLSL.targets" Pack="true" PackagePath="buildTransitive\YotsubaShader.ShadowDusk.GLSL.targets" />
+    <None Include="buildTransitive\ShadowDusk.GLSL.targets" Pack="true" PackagePath="buildTransitive\$(PackageId).targets" />
   </ItemGroup>
 </Project>

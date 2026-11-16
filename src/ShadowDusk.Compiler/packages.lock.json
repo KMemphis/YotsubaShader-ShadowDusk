@@ -30,22 +30,22 @@
         "resolved": "1.7.2",
         "contentHash": "WUUzB3MowHdOqNfSMAms5Ovra+SKgLC4ttH1w75ra3srDGctebSg+aywm7hLdvDn592ydgdbOJN11JKsyAcX+A=="
       },
-      "YotsubaShader.ShadowDusk.Core": {
+      "shadowdusk.core": {
         "type": "Project"
       },
-      "YotsubaShader.ShadowDusk.GLSL": {
+      "shadowdusk.glsl": {
         "type": "Project",
         "dependencies": {
-          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )",
-          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+          "ShadowDusk.Core": "[0.25.1, )",
+          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )"
         }
       },
-      "YotsubaShader.ShadowDusk.HLSL": {
+      "shadowdusk.hlsl": {
         "type": "Project",
         "dependencies": {
+          "ShadowDusk.Core": "[0.25.1, )",
           "Vortice.D3DCompiler": "[3.3.4, )",
-          "Vortice.Dxc": "[3.3.4, 3.3.4]",
-          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+          "Vortice.Dxc": "[3.3.4, 3.3.4]"
         }
       },
       "Silk.NET.SPIRV.Cross.Native": {
@@ -106,22 +106,22 @@
         "resolved": "1.7.2",
         "contentHash": "WUUzB3MowHdOqNfSMAms5Ovra+SKgLC4ttH1w75ra3srDGctebSg+aywm7hLdvDn592ydgdbOJN11JKsyAcX+A=="
       },
-      "YotsubaShader.ShadowDusk.Core": {
+      "shadowdusk.core": {
         "type": "Project"
       },
-      "YotsubaShader.ShadowDusk.GLSL": {
+      "shadowdusk.glsl": {
         "type": "Project",
         "dependencies": {
-          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )",
-          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+          "ShadowDusk.Core": "[0.25.1, )",
+          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )"
         }
       },
-      "YotsubaShader.ShadowDusk.HLSL": {
+      "shadowdusk.hlsl": {
         "type": "Project",
         "dependencies": {
+          "ShadowDusk.Core": "[0.25.1, )",
           "Vortice.D3DCompiler": "[3.3.4, )",
-          "Vortice.Dxc": "[3.3.4, 3.3.4]",
-          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+          "Vortice.Dxc": "[3.3.4, 3.3.4]"
         }
       },
       "Silk.NET.SPIRV.Cross.Native": {

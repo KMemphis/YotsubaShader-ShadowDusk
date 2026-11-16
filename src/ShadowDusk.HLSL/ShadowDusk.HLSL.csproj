@@ -12,7 +12,8 @@
          ShadowDusk.Compiler — this is what makes the in-memory compile work
          with no external tools. -->
     <IsPackable>true</IsPackable>
-    <PackageId>YotsubaShader.ShadowDusk.HLSL</PackageId>
+    <PackageId Condition="'$(UseYotsubaPackageIds)' != 'true'">ShadowDusk.HLSL</PackageId>
+    <PackageId Condition="'$(UseYotsubaPackageIds)' == 'true'">YotsubaShader.ShadowDusk.HLSL</PackageId>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Description>ShadowDusk HLSL front-end: FX9 pre-parse, DXC integration, and the vkd3d-shader DXBC backend for DirectX and FNA. This YotsubaShader fork bundles pinned desktop natives for Windows, Linux and macOS on x64 and ARM64.</Description>
@@ -65,7 +66,7 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
     <!-- Issue #282: the build-time Vortice.Dxc version check (warning SD0220). buildTransitive,
          so it also runs for consumers of ShadowDusk.Compiler / ShadowDusk.ContentPipeline. -->
-    <None Include="buildTransitive\ShadowDusk.HLSL.targets" Pack="true" PackagePath="buildTransitive\YotsubaShader.ShadowDusk.HLSL.targets" />
+    <None Include="buildTransitive\ShadowDusk.HLSL.targets" Pack="true" PackagePath="buildTransitive\$(PackageId).targets" />
   </ItemGroup>
 
   <!-- Vortice.Dxc is the ONLY Vortice package on the DXC path. Vortice.Direct3D12 used to ride
