@@ -31,6 +31,11 @@ name: Build DXC macOS natives (1.7.2212.40)
 
 on:
   workflow_dispatch:
+    inputs:
+      arm64_only:
+        description: Build only the Linux ARM64 native
+        type: boolean
+        default: false
 
 # Least privilege for GITHUB_TOKEN. This workflow only builds the natives and uploads them
 # as run artifacts; a maintainer attaches them to the pinned release by hand, so nothing
@@ -50,6 +55,7 @@ env:
 
 jobs:
   build-macos:
+    if: ${{ !inputs.arm64_only }}
     name: Build ${{ matrix.rid }} dylib
     runs-on: ${{ matrix.os }}
     # DXC is an LLVM-fork build — 1-2 h on the 3-4-core macOS runners is normal.
