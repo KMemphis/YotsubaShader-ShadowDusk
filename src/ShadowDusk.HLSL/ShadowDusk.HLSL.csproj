@@ -12,15 +12,16 @@
          ShadowDusk.Compiler — this is what makes the in-memory compile work
          with no external tools. -->
     <IsPackable>true</IsPackable>
-    <PackageId>ShadowDusk.HLSL</PackageId>
+    <PackageId>YotsubaShader.ShadowDusk.HLSL</PackageId>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <Description>ShadowDusk HLSL front-end: FX9 pre-parse, preprocessor, DXC integration (HLSL to SPIR-V/DXIL via Vortice.Dxc), and the vkd3d-shader DXBC backend (HLSL to SM1–5 D3D bytecode for the DirectX and FNA targets; bundles the vkd3d 2.1 natives for win-x64/linux-x64/osx-x64/osx-arm64). Part of the ShadowDusk.Compiler cross-platform MonoGame/KNI/FNA shader compiler.</Description>
+    <Description>ShadowDusk HLSL front-end: FX9 pre-parse, DXC integration, and the vkd3d-shader DXBC backend for DirectX and FNA. This YotsubaShader fork bundles pinned desktop natives for Windows, Linux and macOS on x64 and ARM64.</Description>
     <PackageTags>monogame kni fna hlsl shader compiler dxc vkd3d dxbc spirv</PackageTags>
     <!-- Phase 26: emit the XML doc file for DocFX. CS1591 suppressed during the
          doc-comment transition so the TreatWarningsAsErrors build stays green. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -64,7 +65,7 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
     <!-- Issue #282: the build-time Vortice.Dxc version check (warning SD0220). buildTransitive,
          so it also runs for consumers of ShadowDusk.Compiler / ShadowDusk.ContentPipeline. -->
-    <None Include="buildTransitive\ShadowDusk.HLSL.targets" Pack="true" PackagePath="buildTransitive\ShadowDusk.HLSL.targets" />
+    <None Include="buildTransitive\ShadowDusk.HLSL.targets" Pack="true" PackagePath="buildTransitive\YotsubaShader.ShadowDusk.HLSL.targets" />
   </ItemGroup>
 
   <!-- Vortice.Dxc is the ONLY Vortice package on the DXC path. Vortice.Direct3D12 used to ride
@@ -119,6 +120,14 @@
           Condition="Exists('$(MSBuildThisFileDirectory)..\..\tools\vkd3d\libvkd3d-shader.so.1')"
           CopyToOutputDirectory="PreserveNewest" Link="libvkd3d-shader.so.1"
           Pack="true" PackagePath="runtimes/linux-x64/native/libvkd3d-shader.so.1" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\tools\vkd3d\win-arm64\libvkd3d-shader-1.dll"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\tools\vkd3d\win-arm64\libvkd3d-shader-1.dll')"
+          CopyToOutputDirectory="PreserveNewest" Link="win-arm64\libvkd3d-shader-1.dll"
+          Pack="true" PackagePath="runtimes/win-arm64/native/libvkd3d-shader-1.dll" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\tools\vkd3d\linux-arm64\libvkd3d-shader.so.1"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\tools\vkd3d\linux-arm64\libvkd3d-shader.so.1')"
+          CopyToOutputDirectory="PreserveNewest" Link="linux-arm64\libvkd3d-shader.so.1"
+          Pack="true" PackagePath="runtimes/linux-arm64/native/libvkd3d-shader.so.1" />
     <None Include="$(MSBuildThisFileDirectory)..\..\tools\vkd3d\osx-x64\libvkd3d-shader.1.dylib"
           Condition="Exists('$(MSBuildThisFileDirectory)..\..\tools\vkd3d\osx-x64\libvkd3d-shader.1.dylib')"
           CopyToOutputDirectory="PreserveNewest" Link="osx-x64\libvkd3d-shader.1.dylib"
@@ -139,6 +148,10 @@
        NATIVE_DLL_SEARCH_DIRECTORIES probe). Until the Phase 37 A hosted build lands,
        restore leaves tools/dxc/ empty and these entries are simply inert. -->
   <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\..\tools\dxc\linux-arm64\libdxcompiler.so"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\tools\dxc\linux-arm64\libdxcompiler.so')"
+          CopyToOutputDirectory="PreserveNewest" Link="linux-arm64\libdxcompiler.so"
+          Pack="true" PackagePath="runtimes/linux-arm64/native/libdxcompiler.so" />
     <None Include="$(MSBuildThisFileDirectory)..\..\tools\dxc\osx-x64\libdxcompiler.dylib"
           Condition="Exists('$(MSBuildThisFileDirectory)..\..\tools\dxc\osx-x64\libdxcompiler.dylib')"
           CopyToOutputDirectory="PreserveNewest" Link="osx-x64\libdxcompiler.dylib"

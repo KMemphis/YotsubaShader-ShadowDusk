@@ -8,7 +8,7 @@
         "resolved": "2.23.0",
         "contentHash": "pY4LmIE8nYXkfCgExxksYlnYZZ4D3/AW13XNcpyp0jJDTkCpDsXL0nLOX7CM7tPS6xvkiERRd+Do2zegbl7Xtw=="
       },
-      "shadowdusk.core": {
+      "YotsubaShader.ShadowDusk.Core": {
         "type": "Project"
       }
     },
@@ -19,7 +19,7 @@
         "resolved": "2.23.0",
         "contentHash": "pY4LmIE8nYXkfCgExxksYlnYZZ4D3/AW13XNcpyp0jJDTkCpDsXL0nLOX7CM7tPS6xvkiERRd+Do2zegbl7Xtw=="
       },
-      "shadowdusk.core": {
+      "YotsubaShader.ShadowDusk.Core": {
         "type": "Project"
       }
     }

@@ -30,6 +30,15 @@ public sealed class DxcPinnedNativeIdentityTests
             DxcNativeKind.Compiler);
     }
 
+    [Fact]
+    public void LinuxArm64Native_CarriesThePinnedBuildId()
+    {
+        AssertPinned(
+            Path.Combine(AppContext.BaseDirectory, "linux-arm64", "libdxcompiler.so"),
+            "linux-arm64",
+            DxcNativeKind.Compiler);
+    }
+
     [WindowsTheory]
     [InlineData("win-x64")]
     [InlineData("win-arm64")]

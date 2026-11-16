@@ -49,10 +49,9 @@ EnsureDir (Split-Path $OsxArm64)
 # vkd3d-shader (cross-platform DXBC backend, Phase 18 Track A / Phase 39 FNA)
 # ---------------------------------------------------------------------------
 # The vkd3d-shader native lib is a RESTORED artifact, not checked into the repo.
-# All four shipping RIDs are downloaded from the FIXED GitHub Release tag below and
-# SHA-256-verified against the pins (Phase 37 C). Every host restores every RID:
-# the binaries are small (~1-2 MB each) and that makes any machine pack-ready (the
-# ShadowDusk.HLSL nupkg must contain all four — release.yml gates on it).
+# All six desktop RIDs are downloaded from the fixed GitHub Release tags below and
+# SHA-256-verified against the pins. Every host restores every RID so any machine is
+# pack-ready; the YotsubaShader release verifier requires all six.
 #
 # Provenance: linux/osx binaries are built by .github/workflows/build-vkd3d-natives.yml
 # from the pinned vkd3d 2.1 tarball (linux on ubuntu:20.04 = glibc 2.31 baseline;
@@ -64,8 +63,9 @@ EnsureDir (Split-Path $OsxArm64)
 #   make    # from vkd3d-2.1.tar.xz (https://dl.winehq.org/vkd3d/source/)
 # Invoked up-front so it always runs regardless of the spirv-cross restore state below.
 $Vkd3dReleaseUrl = 'https://github.com/kaltinril/ShadowDusk/releases/download/native-vkd3d-2.1'
+$Vkd3dArmReleaseUrl = 'https://github.com/KMemphis/YotsubaShader-ShadowDusk/releases/download/native-vkd3d-2.1-arm64'
 
-function Restore-Vkd3dFile([string]$Asset, [string]$DestRel, [string]$Sha256) {
+function Restore-Vkd3dFile([string]$Asset, [string]$DestRel, [string]$Sha256, [string]$Url = $Vkd3dReleaseUrl) {
     $Vkd3dDir = Join-Path $RepoRoot 'tools' 'vkd3d'
     $Dest = Join-Path $Vkd3dDir $DestRel
     EnsureDir (Split-Path $Dest)
@@ -85,9 +85,9 @@ function Restore-Vkd3dFile([string]$Asset, [string]$DestRel, [string]$Sha256) {
 
     $tmp = "$Dest.tmp"
     try {
-        Invoke-WebRequest -Uri "$Vkd3dReleaseUrl/$Asset" -OutFile $tmp -UseBasicParsing
+        Invoke-WebRequest -Uri "$Url/$Asset" -OutFile $tmp -UseBasicParsing
     } catch {
-        Write-Warning ("restore.ps1: could not download $Asset from $Vkd3dReleaseUrl (offline?); " +
+        Write-Warning ("restore.ps1: could not download $Asset from $Url (offline?); " +
             "vkd3d-dependent paths (FNA target, DxbcBackend.Vkd3d) will fail SD0211 / skip in tests. $_")
         if (Test-Path $tmp) { Remove-Item -Force $tmp }
         return   # non-fatal by design
@@ -105,8 +105,12 @@ function Restore-Vkd3dFile([string]$Asset, [string]$DestRel, [string]$Sha256) {
 function Restore-Vkd3dShader {
     Restore-Vkd3dFile 'libvkd3d-shader-1.dll' 'libvkd3d-shader-1.dll' `
         '9b97222601ee00ffc60f9f7bc426e13cc7df325c46725fe80a036e3eff9e2edb'
+    Restore-Vkd3dFile 'libvkd3d-shader-1.dll.win-arm64' (Join-Path 'win-arm64' 'libvkd3d-shader-1.dll') `
+        '90197d9a79c313cfecc581ca61d889cc3ba88f2b3c0f7638deb186fe74ed8262' $Vkd3dArmReleaseUrl
     Restore-Vkd3dFile 'libvkd3d-shader.so.1' 'libvkd3d-shader.so.1' `
         'bda15bc2a8b1a017a4adfed3c00c85f696cebb41f629b715ad8f58a37bc26678'
+    Restore-Vkd3dFile 'libvkd3d-shader.so.1.linux-arm64' (Join-Path 'linux-arm64' 'libvkd3d-shader.so.1') `
+        'c548444aea512448514b23773b0e974fac3ee0f80643767d377b8d1fdc86dfed' $Vkd3dArmReleaseUrl
     Restore-Vkd3dFile 'libvkd3d-shader.1.osx-x64.dylib' (Join-Path 'osx-x64' 'libvkd3d-shader.1.dylib') `
         '0fcd4e99d7c4c9b0375535ccfd0c27cf2f72fe60fb28ca7ffc770616d58c09f6'
     Restore-Vkd3dFile 'libvkd3d-shader.1.osx-arm64.dylib' (Join-Path 'osx-arm64' 'libvkd3d-shader.1.dylib') `
@@ -137,6 +141,8 @@ Restore-Vkd3dShader
 $DxcReleaseUrl = 'https://github.com/kaltinril/ShadowDusk/releases/download/native-dxc-1.7.2212.40'
 $DxcOsxX64Sha256   = '9e61d5c1993d2cd5a5ea6701011d0a86e8c8dd89c995ef0c4d03ff3b83dbbc17'
 $DxcOsxArm64Sha256 = '4f29ef90af61426a39037a2e9d7215a48c7c746328a38a20028e456c1ee3d811'
+$DxcLinuxArm64ReleaseUrl = 'https://github.com/KMemphis/YotsubaShader-ShadowDusk/releases/download/native-dxc-1.7.2212.40-linux-arm64'
+$DxcLinuxArm64Sha256 = '7ecc3bc115efd6e34904992c310a6779032b579d41cdc0f9c66edf7292295cd5'
 
 function Restore-DxcFile([string]$Asset, [string]$DestRel, [string]$Sha256, [string]$Url = $DxcReleaseUrl) {
     $DxcDir = Join-Path $RepoRoot 'tools' 'dxc'
@@ -189,6 +195,8 @@ function Restore-DxcMacos {
 }
 
 Restore-DxcMacos
+Restore-DxcFile 'libdxcompiler.so' (Join-Path 'linux-arm64' 'libdxcompiler.so') `
+    $DxcLinuxArm64Sha256 $DxcLinuxArm64ReleaseUrl
 
 # ---------------------------------------------------------------------------
 # Android natives (Phase 50): on-device DXC + SPIRV-Cross for arm64-v8a
@@ -587,10 +595,8 @@ function Restore-SlangRid([string]$Rid, [string]$ZipSuffix, [string]$ZipSha,
     Write-Host "restore.ps1: slangc ($Rid) downloaded, zip + file hashes OK"
 }
 
-# linux-arm64 and win-arm64 are NOT restored although upstream publishes them
-# (project_decisions.md): linux-arm64 has no DXC native, so the core pipeline cannot run there
-# (issue #227); win-arm64 works in the core pipeline but its slangc is left out of the package
-# for size until someone asks (issue #286; re-add the pins from commit 4af9715d).
+# Slang binaries for linux-arm64 and win-arm64 are not restored. These are only needed by
+# the optional Slang-backed path; the core DXC pipeline has its own ARM64 natives above.
 function Restore-Slang {
     Restore-SlangRid 'win-x64' 'windows-x86_64' `
         '5ed0a59d650a0af0aca45d5db4e083b3d8fb5cea05748747dd95dfbe9c580658' `

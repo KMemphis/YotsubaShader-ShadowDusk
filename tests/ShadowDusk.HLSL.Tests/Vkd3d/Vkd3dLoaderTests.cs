@@ -28,12 +28,14 @@ public sealed class Vkd3dLoaderTests
         foreach ((string rid, string pinned) in Vkd3dLoader.Sha256ByRid)
             text.ShouldContain(pinned, Case.Sensitive, $"{script} does not pin {rid}'s vkd3d-shader as {pinned}");
 
-        Vkd3dLoader.Sha256ByRid.Count.ShouldBe(4, "win-x64, linux-x64, osx-x64 and osx-arm64 ship a vkd3d-shader");
+        Vkd3dLoader.Sha256ByRid.Count.ShouldBe(6, "both x64 and ARM64 desktop RIDs ship vkd3d-shader");
     }
 
     [Theory]
     [InlineData("win-x64", "libvkd3d-shader-1.dll")]
+    [InlineData("win-arm64", "win-arm64/libvkd3d-shader-1.dll")]
     [InlineData("linux-x64", "libvkd3d-shader.so.1")]
+    [InlineData("linux-arm64", "linux-arm64/libvkd3d-shader.so.1")]
     [InlineData("osx-x64", "osx-x64/libvkd3d-shader.1.dylib")]
     [InlineData("osx-arm64", "osx-arm64/libvkd3d-shader.1.dylib")]
     public void TheBuildOutputCopy_IsThePinnedFile(string rid, string relativePath)

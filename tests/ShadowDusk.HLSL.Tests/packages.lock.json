@@ -181,15 +181,15 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
-      "shadowdusk.core": {
+      "YotsubaShader.ShadowDusk.Core": {
         "type": "Project"
       },
-      "shadowdusk.hlsl": {
+      "YotsubaShader.ShadowDusk.HLSL": {
         "type": "Project",
         "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
           "Vortice.D3DCompiler": "[3.3.4, )",
-          "Vortice.Dxc": "[3.3.4, 3.3.4]"
+          "Vortice.Dxc": "[3.3.4, 3.3.4]",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
         }
       },
       "Vortice.D3DCompiler": {
@@ -395,15 +395,15 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
-      "shadowdusk.core": {
+      "YotsubaShader.ShadowDusk.Core": {
         "type": "Project"
       },
-      "shadowdusk.hlsl": {
+      "YotsubaShader.ShadowDusk.HLSL": {
         "type": "Project",
         "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
           "Vortice.D3DCompiler": "[3.3.4, )",
-          "Vortice.Dxc": "[3.3.4, 3.3.4]"
+          "Vortice.Dxc": "[3.3.4, 3.3.4]",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
         }
       },
       "Vortice.D3DCompiler": {

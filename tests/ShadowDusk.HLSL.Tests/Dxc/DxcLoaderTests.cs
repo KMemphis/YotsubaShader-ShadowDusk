@@ -147,6 +147,22 @@ public sealed class DxcLoaderTests
     }
 
     [Fact]
+    public void PinnedPairDirectories_LinuxArm64ProbesTheRestoredPerArchCopy()
+    {
+        string plugin = Path.Combine(Path.GetTempPath(), "plugin");
+        var dirs = DxcLoader.GetPinnedPairDirectories(
+            Base, [], [plugin], "linux-arm64", ignoreCase: false).ToList();
+
+        dirs.ShouldBe(new[] {
+            Path.Combine(plugin, "runtimes", "linux-arm64", "native"),
+            Path.Combine(plugin, "linux-arm64"),
+            plugin,
+            Path.Combine(Base, "runtimes", "linux-arm64", "native"),
+            Path.Combine(Base, "linux-arm64"),
+            Base});
+    }
+
+    [Fact]
     public void PinnedPairDirectories_AssemblyLoadedFromAPackageFolder_ProbeThatPackagesRuntimes()
     {
         // An assembly loaded straight from the NuGet cache sits in <package>/lib/<tfm>/ and its

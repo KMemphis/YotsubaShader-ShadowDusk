@@ -26,6 +26,7 @@ public sealed class DxcNativeIdentityTests
     [InlineData("win-x64", true, DxcNativeIdentity.WindowsValidatorVersion)]
     [InlineData("win-arm64", true, DxcNativeIdentity.WindowsValidatorVersion)]
     [InlineData("linux-x64", false, "65681bf462e07b533a7c7bfa54bda4e23a6c5d9f")]
+    [InlineData("linux-arm64", false, "f38d0fc3c64fd187f02b3ad7a3eadf5e041d3c63")]
     [InlineData("osx-x64", false, "1b5513a41646349c89cb814d05326d9a")]
     [InlineData("osx-arm64", false, "9e2d66e9c3a934429f46afaae3fdc480")]
     [InlineData("android-arm64", false, "5882f6181b9e7149c5c5c4dbb2a88ed4e78d3223")]
@@ -36,7 +37,6 @@ public sealed class DxcNativeIdentityTests
     }
 
     [Theory]
-    [InlineData("linux-arm64", false)]
     [InlineData("win-x86", false)]
     [InlineData("linux-x64", true)]
     [InlineData("osx-arm64", true)]

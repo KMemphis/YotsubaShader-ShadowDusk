@@ -681,12 +681,16 @@ internal static class DxcLoader
             foreach (string dir in assemblyDirectories)
             {
                 yield return Path.Combine(dir, "runtimes", rid, "native");
+                if (rid == "linux-arm64")
+                    yield return Path.Combine(dir, rid);
                 yield return dir;
                 if (PackageRootOf(dir) is { } package)
                     yield return Path.Combine(package, "runtimes", rid, "native");
             }
 
             yield return Path.Combine(baseDirectory, "runtimes", rid, "native");
+            if (rid == "linux-arm64")
+                yield return Path.Combine(baseDirectory, rid);
             yield return baseDirectory;
             foreach (string dir in nativeSearchDirectories)
                 yield return dir;

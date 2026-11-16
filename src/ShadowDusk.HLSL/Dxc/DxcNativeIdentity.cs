@@ -66,6 +66,9 @@ internal static class DxcNativeIdentity
     /// <summary>GNU build id of Vortice.Dxc 3.3.4's <c>runtimes/linux-x64/native/libdxcompiler.so</c>.</summary>
     internal const string LinuxX64CompilerBuildId = "65681bf462e07b533a7c7bfa54bda4e23a6c5d9f";
 
+    /// <summary>GNU build id of our pinned Linux ARM64 DXC built from e043f4a1.</summary>
+    internal const string LinuxArm64CompilerBuildId = "f38d0fc3c64fd187f02b3ad7a3eadf5e041d3c63";
+
     /// <summary><c>LC_UUID</c> of our <c>osx-x64</c> <c>libdxcompiler.dylib</c> (release tag <c>native-dxc-1.7.2212.40</c>).</summary>
     internal const string OsxX64CompilerUuid = "1b5513a41646349c89cb814d05326d9a";
 
@@ -112,6 +115,7 @@ internal static class DxcNativeIdentity
         ("win-x64" or "win-arm64", DxcNativeKind.Compiler) => WindowsCompilerVersion,
         ("win-x64" or "win-arm64", DxcNativeKind.Validator) => WindowsValidatorVersion,
         ("linux-x64", DxcNativeKind.Compiler) => LinuxX64CompilerBuildId,
+        ("linux-arm64", DxcNativeKind.Compiler) => LinuxArm64CompilerBuildId,
         ("osx-x64", DxcNativeKind.Compiler) => OsxX64CompilerUuid,
         ("osx-arm64", DxcNativeKind.Compiler) => OsxArm64CompilerUuid,
         ("android-arm64", DxcNativeKind.Compiler) => AndroidArm64CompilerBuildId,

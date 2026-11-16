@@ -117,30 +117,30 @@
         "resolved": "1.7.2",
         "contentHash": "WUUzB3MowHdOqNfSMAms5Ovra+SKgLC4ttH1w75ra3srDGctebSg+aywm7hLdvDn592ydgdbOJN11JKsyAcX+A=="
       },
-      "shadowdusk.compiler": {
+      "YotsubaShader.ShadowDusk.Compiler": {
         "type": "Project",
         "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "ShadowDusk.GLSL": "[0.25.1, )",
-          "ShadowDusk.HLSL": "[0.25.1, )"
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )",
+          "YotsubaShader.ShadowDusk.GLSL": "[0.25.1, )",
+          "YotsubaShader.ShadowDusk.HLSL": "[0.25.1, )"
         }
       },
-      "shadowdusk.core": {
+      "YotsubaShader.ShadowDusk.Core": {
         "type": "Project"
       },
-      "shadowdusk.glsl": {
+      "YotsubaShader.ShadowDusk.GLSL": {
         "type": "Project",
         "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )"
+          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
         }
       },
-      "shadowdusk.hlsl": {
+      "YotsubaShader.ShadowDusk.HLSL": {
         "type": "Project",
         "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
           "Vortice.D3DCompiler": "[3.3.4, )",
-          "Vortice.Dxc": "[3.3.4, 3.3.4]"
+          "Vortice.Dxc": "[3.3.4, 3.3.4]",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
         }
       },
       "Silk.NET.SPIRV.Cross.Native": {

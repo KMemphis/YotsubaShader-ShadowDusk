@@ -13,7 +13,7 @@ namespace ShadowDusk.HLSL.Vkd3d;
 ///
 /// <para>The binary ships two ways: packed into the ShadowDusk.HLSL NuGet under
 /// <c>runtimes/&lt;rid&gt;/native</c>, and copied to build output (flat on Windows and Linux,
-/// <c>osx-{x64,arm64}/</c> on macOS, whose arches share one file name) from the restored
+/// per-RID ARM64 directories and <c>osx-{x64,arm64}/</c> on macOS) from the restored
 /// <c>tools/vkd3d/</c>. <see cref="PinnedNativeLibrary"/> probes those places by absolute path
 /// (beside the ShadowDusk assemblies first, so a plugin host such as MGCB finds them), checks
 /// each file's SHA-256 against <see cref="Sha256ByRid"/> BEFORE loading it, and on macOS checks
@@ -46,7 +46,9 @@ internal static class Vkd3dLoader
     internal static readonly IReadOnlyDictionary<string, string> Sha256ByRid = new Dictionary<string, string>
     {
         ["win-x64"] = "9b97222601ee00ffc60f9f7bc426e13cc7df325c46725fe80a036e3eff9e2edb",
+        ["win-arm64"] = "90197d9a79c313cfecc581ca61d889cc3ba88f2b3c0f7638deb186fe74ed8262",
         ["linux-x64"] = "bda15bc2a8b1a017a4adfed3c00c85f696cebb41f629b715ad8f58a37bc26678",
+        ["linux-arm64"] = "c548444aea512448514b23773b0e974fac3ee0f80643767d377b8d1fdc86dfed",
         ["osx-x64"] = "0fcd4e99d7c4c9b0375535ccfd0c27cf2f72fe60fb28ca7ffc770616d58c09f6",
         ["osx-arm64"] = "b624db5641469c34bc44849cbc42201ffd7cdd26bfc8bb6a4c8f5f6757f8d34b",
     };
@@ -243,13 +245,13 @@ internal static class Vkd3dLoader
     }
 
     /// <summary>
-    /// Relative directories to probe under tools/vkd3d/. macOS restores per-arch
-    /// (osx-x64 / osx-arm64 share a dylib file name); everywhere else the layout is flat.
+    /// Relative directories to probe under tools/vkd3d/. ARM64 files are per-arch;
+    /// the original x64 Windows/Linux files remain flat.
     /// </summary>
     private static string[] GetProbeSubdirectories()
     {
         if (!OperatingSystem.IsMacOS())
-            return [""];
+            return [PinnedNativeLibrary.CurrentRid(), ""];
         // ProcessArchitecture, not OSArchitecture: under Rosetta 2 the OS is Arm64
         // but only an x64 dylib can load into the x64 process (see DxcLoader.Resolve).
         return [PinnedNativeLibrary.CurrentRid(), ""];

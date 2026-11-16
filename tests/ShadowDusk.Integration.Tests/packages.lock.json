@@ -265,40 +265,40 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
-      "shadowdusk.compiler": {
-        "type": "Project",
-        "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "ShadowDusk.GLSL": "[0.25.1, )",
-          "ShadowDusk.HLSL": "[0.25.1, )"
-        }
-      },
-      "shadowdusk.core": {
-        "type": "Project"
-      },
-      "shadowdusk.glsl": {
-        "type": "Project",
-        "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )"
-        }
-      },
-      "shadowdusk.hlsl": {
-        "type": "Project",
-        "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "Vortice.D3DCompiler": "[3.3.4, )",
-          "Vortice.Dxc": "[3.3.4, 3.3.4]"
-        }
-      },
       "shadowdusk.mgcbplugin": {
         "type": "Project",
         "dependencies": {
-          "ShadowDusk.Compiler": "[0.25.1, )"
+          "YotsubaShader.ShadowDusk.Compiler": "[0.25.1, )"
         }
       },
       "shadowdusk.shadertoy": {
         "type": "Project"
+      },
+      "YotsubaShader.ShadowDusk.Compiler": {
+        "type": "Project",
+        "dependencies": {
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )",
+          "YotsubaShader.ShadowDusk.GLSL": "[0.25.1, )",
+          "YotsubaShader.ShadowDusk.HLSL": "[0.25.1, )"
+        }
+      },
+      "YotsubaShader.ShadowDusk.Core": {
+        "type": "Project"
+      },
+      "YotsubaShader.ShadowDusk.GLSL": {
+        "type": "Project",
+        "dependencies": {
+          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+        }
+      },
+      "YotsubaShader.ShadowDusk.HLSL": {
+        "type": "Project",
+        "dependencies": {
+          "Vortice.D3DCompiler": "[3.3.4, )",
+          "Vortice.Dxc": "[3.3.4, 3.3.4]",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+        }
       },
       "Silk.NET.SPIRV.Cross.Native": {
         "type": "CentralTransitive",
@@ -593,40 +593,40 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
-      "shadowdusk.compiler": {
-        "type": "Project",
-        "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "ShadowDusk.GLSL": "[0.25.1, )",
-          "ShadowDusk.HLSL": "[0.25.1, )"
-        }
-      },
-      "shadowdusk.core": {
-        "type": "Project"
-      },
-      "shadowdusk.glsl": {
-        "type": "Project",
-        "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )"
-        }
-      },
-      "shadowdusk.hlsl": {
-        "type": "Project",
-        "dependencies": {
-          "ShadowDusk.Core": "[0.25.1, )",
-          "Vortice.D3DCompiler": "[3.3.4, )",
-          "Vortice.Dxc": "[3.3.4, 3.3.4]"
-        }
-      },
       "shadowdusk.mgcbplugin": {
         "type": "Project",
         "dependencies": {
-          "ShadowDusk.Compiler": "[0.25.1, )"
+          "YotsubaShader.ShadowDusk.Compiler": "[0.25.1, )"
         }
       },
       "shadowdusk.shadertoy": {
         "type": "Project"
+      },
+      "YotsubaShader.ShadowDusk.Compiler": {
+        "type": "Project",
+        "dependencies": {
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )",
+          "YotsubaShader.ShadowDusk.GLSL": "[0.25.1, )",
+          "YotsubaShader.ShadowDusk.HLSL": "[0.25.1, )"
+        }
+      },
+      "YotsubaShader.ShadowDusk.Core": {
+        "type": "Project"
+      },
+      "YotsubaShader.ShadowDusk.GLSL": {
+        "type": "Project",
+        "dependencies": {
+          "Silk.NET.SPIRV.Cross.Native": "[2.23.0, )",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+        }
+      },
+      "YotsubaShader.ShadowDusk.HLSL": {
+        "type": "Project",
+        "dependencies": {
+          "Vortice.D3DCompiler": "[3.3.4, )",
+          "Vortice.Dxc": "[3.3.4, 3.3.4]",
+          "YotsubaShader.ShadowDusk.Core": "[0.25.1, )"
+        }
       },
       "Silk.NET.SPIRV.Cross.Native": {
         "type": "CentralTransitive",
