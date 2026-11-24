@@ -1,0 +1,599 @@
+using System.Text;
+using System.Text.RegularExpressions;
+using ShadowDusk.ShaderToy;
+
+namespace ShadowDusk.SkSL;
+
+/// <summary>
+/// Converts an SkSL runtime-effect shader (SkSL in) to HLSL <c>.fx</c> text (out). SkSL is
+/// GLSL-shaped, so this is a thin source-to-source frontend: it rewrites SkSL spellings to GLSL,
+/// turns <c>half4 main(float2 coord)</c> into the entry of <see cref="ShaderToyConverter"/>, and
+/// lowers <c>uniform shader</c> children to textures. Not to be confused with
+/// <c>ShadowDusk.Compiler.Sksl.SkslConverter</c>, which goes the other way (<c>.fx</c> to SkSL).
+/// </summary>
+/// <remarks>
+/// <para><b>Host contract</b> (what a MonoGame consumer does to get Skia's image; measured on MonoGame
+/// DesktopGL only, see <c>validation/SkSLVsGl</c>):</para>
+/// <list type="bullet">
+/// <item>Draw with <c>SpriteBatch</c> (the effect is pixel-shader only; SpriteBatch supplies the
+/// vertex shader), and set <c>iResolution</c> to the drawn sprite's size in pixels
+/// (<c>Vector3(width, height, 1)</c>). <c>main</c> receives the pixel center local to the sprite, with a
+/// top-left origin, wherever the sprite is placed: what Skia passes when the shape is drawn in its own
+/// translated space (<c>canvas.Translate(x, y)</c>, then a rect at the origin). SpriteBatch binds the
+/// sprite's texture to slot 0, which is the first declared child's sampler (a child that is never
+/// evaluated is refused, so the first declared child is always sampled), so draw the first child as
+/// the sprite. Draw the whole texture, unflipped: a source rectangle or a <c>SpriteEffects</c> flip
+/// changes the UV range and <c>main</c>'s coordinate with it. If the sprite is drawn scaled (a
+/// zoomed camera, a larger destination), <c>iResolution</c> is its size in the shader's own units,
+/// before the scale, as Skia's coordinate is. The color passed to <c>SpriteBatch.Draw</c> multiplies
+/// the result: <c>Color.White</c> changes nothing and <c>Color.White * alpha</c> fades it, as a Skia
+/// paint's alpha does.</item>
+/// <item>For each <c>uniform shader img;</c> child, bind the texture to <c>imgTexture</c> and set
+/// <c>imgTexelSize</c> to <c>1 / (width, height)</c> of that texture. <c>img.eval(p)</c> samples at
+/// <c>p * imgTexelSize</c>, so SkSL's pixel coordinates carry over. Use the sampler state Skia would
+/// (e.g. <c>SamplerState.LinearClamp</c> for a clamped, linearly filtered image shader).</item>
+/// <item><b>Integer uniforms:</b> <c>uniform int</c>/<c>bool</c> (and vectors) become <c>float</c> effect
+/// parameters on every target (the OpenGL target has no integer uniforms); the shader still reads them
+/// as <c>int(name)</c>/<c>bool(name)</c>. The host sets a float: the whole number for an int, 0 or 1 for
+/// a bool.</item>
+/// <item><b>Alpha:</b> SkSL works in premultiplied alpha (<c>eval</c> returns premultiplied color and
+/// <c>main</c> returns premultiplied color). The <c>.fx</c> has two techniques, so either texture
+/// convention renders what Skia's <c>SrcOver</c> renders with no conversion by the host:
+/// <see cref="PremultipliedTechniqueName"/> (first, so MonoGame's default) for premultiplied textures
+/// drawn with <c>BlendState.AlphaBlend</c> (MonoGame's content-pipeline default), and
+/// <see cref="StraightAlphaTechniqueName"/> for straight-alpha textures (<c>Texture2D.FromStream</c>,
+/// Gum with <c>UsePremultipliedAlpha</c> off) drawn with <c>BlendState.NonPremultiplied</c>. The
+/// straight technique premultiplies each child sample after filtering, as Skia does for a
+/// straight-alpha image, and un-premultiplies the result. Both match Skia's color; with
+/// <c>NonPremultiplied</c> the destination alpha follows that blend state's own equation
+/// (<c>a*a + d*(1-a)</c>, where <c>SrcOver</c> gives <c>a + d*(1-a)</c>), which matters only if the
+/// target's alpha is used later. A shader that returns <c>rgb &gt; a</c> is outside SkSL's contract
+/// and is not guaranteed to match.</item>
+/// </list>
+/// <para>Unsupported SkSL (<c>sk_FragCoord</c>, which Skia's runtime shaders reject too, <c>layout(color)</c>, color filter and blender entries
+/// or children, <c>shader</c> parameters, the color-space built-ins) fails with an SkSL diagnostic
+/// that says what to change. Diagnostics from the ShaderToy stage keep the SkSL line number; the
+/// column can shift on a line where a type was respelled.</para>
+/// </remarks>
+public static class SkSLToFxConverter
+{
+    /// <summary>The effect name used when the caller does not set one.</summary>
+    public const string DefaultEffectName = "SkSLEffect";
+
+    /// <summary>The technique name used when the caller does not set one.</summary>
+    public const string DefaultTechniqueName = "SkSL";
+
+    /// <summary>
+    /// The default technique: premultiplied textures in, premultiplied color out, drawn with
+    /// <c>BlendState.AlphaBlend</c>. It is the first technique, so it is MonoGame's default
+    /// <c>CurrentTechnique</c>. Equals <see cref="DefaultTechniqueName"/>.
+    /// </summary>
+    public const string PremultipliedTechniqueName = DefaultTechniqueName;
+
+    /// <summary>
+    /// The straight-alpha technique: straight-alpha textures in, straight color out, drawn with
+    /// <c>BlendState.NonPremultiplied</c> (e.g. Gum with <c>UsePremultipliedAlpha</c> off). When the
+    /// caller sets <see cref="ConvertOptions.TechniqueName"/>, it is that name plus
+    /// <see cref="StraightAlphaTechniqueSuffix"/>.
+    /// </summary>
+    public const string StraightAlphaTechniqueName = DefaultTechniqueName + StraightAlphaTechniqueSuffix;
+
+    /// <summary>Appended to the technique name to name the straight-alpha technique.</summary>
+    public const string StraightAlphaTechniqueSuffix = "StraightAlpha";
+
+    private const string TexelSizeSuffix = "TexelSize";
+    private const string ChildColor = "sd_ChildColor";
+    private const string StraightAlphaFlag = "sd_StraightAlpha";
+
+    private const string ChildColorHelper =
+        $" bool {StraightAlphaFlag}; vec4 {ChildColor}(vec4 c) {{ return {StraightAlphaFlag} ? vec4(c.rgb * c.a, c.a) : c; }}";
+
+    private static readonly ConvertOptions ShaderToyDefaults = new();
+
+    // SkSL type spelling -> GLSL spelling. half/float share a GLSL type (no precision distinction).
+    private static readonly Dictionary<string, string> Types = BuildTypes();
+
+    private static readonly Regex Identifier = new(@"\b[A-Za-z_]\w*\b", RegexOptions.Compiled);
+
+    private static readonly Regex MainCall = new(@"\bmain\s*\(", RegexOptions.Compiled);
+
+    private static readonly Regex EntryDecl = new(
+        @"\b(?:half4|float4|vec4)\s+main\s*\(\s*(?:const\s+)?(?:in\s+)?(?:float2|half2|vec2)\s+(?<pname>\w+)\s*\)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex ChildDecl = new(@"\buniform\s+shader\s+(?<n>\w+)\s*;", RegexOptions.Compiled);
+
+    // An int/bool uniform (scalar or vector, any precision qualifier). The terminator tells a plain
+    // declaration (';') from an array ('['), a multi-declarator (',') or an initializer ('=').
+    private static readonly Regex IntegerUniform = new(
+        @"\buniform\s+(?:(?:highp|mediump|lowp)\s+)?(?<t>(?:int|short|bool)[234]?)\s+(?<n>\w+)\s*(?<end>[;,\[=])",
+        RegexOptions.Compiled);
+
+    private static readonly Regex AnyEval = new(@"\b(?<n>\w+)\s*\.\s*eval\s*\(", RegexOptions.Compiled);
+
+    private static readonly Regex NonSquareMatrix = new(@"^(?:half|float)([2-4])x([2-4])$", RegexOptions.Compiled);
+
+    private static readonly HashSet<string> ColorVectors = new(StringComparer.Ordinal) { "half4", "float4", "vec4" };
+
+    // Identifiers the ShaderToy stage gives a meaning of its own; SkSL source must not use them.
+    private static readonly HashSet<string> ReservedNames = new(StringComparer.Ordinal)
+    {
+        "mainImage", "glsl_mod", "openfl_TextureCoordv", "openfl_TextureSize",
+        // The generated pixel shaders and their input struct.
+        "PSInput", "PSMain", "PSMainStraightAlpha",
+    };
+
+    /// <summary>Convert an SkSL shader to HLSL <c>.fx</c> text.</summary>
+    /// <param name="skslSource">The SkSL source (a runtime-effect shader, <c>half4 main(float2)</c>).</param>
+    /// <param name="options">
+    /// Optional overrides. Fields left at their defaults keep the SkSL defaults
+    /// (<see cref="DefaultEffectName"/>, <see cref="DefaultTechniqueName"/>).
+    /// <see cref="ConvertOptions.CommonSource"/> is not supported.
+    /// </param>
+    public static ConvertResult Convert(string skslSource, ConvertOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(skslSource);
+
+        options ??= ShaderToyDefaults;
+        if (options.CommonSource is not null)
+        {
+            return Fail(new[] { Error("SD0660", "CommonSource is a ShaderToy option; SkSL has no Common tab.", 0, 0, "CommonSource") });
+        }
+
+        options = options with
+        {
+            EffectName = options.EffectName == ShaderToyDefaults.EffectName ? DefaultEffectName : options.EffectName,
+            TechniqueName = options.TechniqueName == ShaderToyDefaults.TechniqueName ? DefaultTechniqueName : options.TechniqueName,
+            SkSLEntry = true,
+        };
+
+        // Comments are blanked in place (same length, newlines kept), so every scan below sees only
+        // code and reports line/column values valid for the original source.
+        string source = ShaderToyConverter.BlankComments(skslSource);
+
+        var diagnostics = new List<ConvertDiagnostic>();
+        List<string> children = ChildDecl.Matches(source).Select(m => m.Groups["n"].Value).ToList();
+        CheckEntry(source, diagnostics);
+        ScanIdentifiers(source, children, diagnostics);
+        if (diagnostics.Count == 0)
+        {
+            source = RewriteEvals(source, children, diagnostics);
+        }
+
+        if (diagnostics.Count == 0)
+        {
+            source = LowerIntegerUniforms(source, diagnostics);
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            return Fail(diagnostics);
+        }
+
+        // Each child becomes a sampler plus its host-set texel size. The child-sample helper follows the
+        // last declaration (same line, so later line numbers hold): the straight-alpha technique sets its
+        // flag to premultiply each sample, as Skia does when it samples a straight-alpha image.
+        int lastChild = children.Count;
+        source = ChildDecl.Replace(source, m =>
+            $"uniform sampler2D {m.Groups["n"].Value}; uniform vec2 {m.Groups["n"].Value}{TexelSizeSuffix};" +
+            (--lastChild == 0 ? ChildColorHelper : string.Empty));
+        source = EntryDecl.Replace(source, m => $"vec4 mainImage(in vec2 {m.Groups["pname"].Value})", 1);
+        source = Identifier.Replace(source, m => Types.TryGetValue(m.Value, out string? glsl) ? glsl : m.Value);
+
+        ConvertResult result = ShaderToyConverter.Convert(source, options);
+
+        // The ShaderToy stage's diagnostics carry no code; give them the SkSL frontend's, so every
+        // diagnostic a host sees from this entry point is branchable.
+        return result with
+        {
+            Diagnostics = result.Diagnostics
+                .Select(d => d.Code is not null
+                    ? d
+                    : d with { Code = d.Severity == DiagnosticSeverity.Error ? "SD0672" : "SD0673" })
+                .ToList(),
+        };
+    }
+
+    /// <summary>
+    /// Lowers <c>uniform int/bool</c> (and their vectors) to float uniforms. The effect model has no
+    /// usable integer or boolean uniform on the OpenGL target (SD0210), and MonoGame's float parameters
+    /// are what a host sets. The uniform keeps its name and becomes <c>float</c>; every use in the source
+    /// reads <c>int(name)</c> / <c>bool(name)</c> so the shader still computes in the declared type
+    /// (integer division, <c>%</c>, array indices). The host sets 0/1 for a bool and the whole number
+    /// for an int. A form this cannot lower faithfully (array, multi-declarator, a local that reuses the name)
+    /// is refused with SD0671.
+    /// </summary>
+    private static string LowerIntegerUniforms(string source, List<ConvertDiagnostic> diagnostics)
+    {
+        MatchCollection decls = IntegerUniform.Matches(source);
+        if (decls.Count == 0)
+        {
+            return source;
+        }
+
+        var lowered = new Dictionary<string, string>(StringComparer.Ordinal);
+        var edits = new List<(int Index, int Length, string Text)>();
+        var declNames = new HashSet<int>();
+        foreach (Match m in decls)
+        {
+            string name = m.Groups["n"].Value;
+            string type = m.Groups["t"].Value;
+            string end = m.Groups["end"].Value;
+            Group nameGroup = m.Groups["n"];
+            if (end != ";")
+            {
+                Locate(source, nameGroup.Index, out int line, out int col);
+                string why = end switch
+                {
+                    "[" => "an array",
+                    "," => "declared with others in one statement",
+                    _ => "initialized",
+                };
+                diagnostics.Add(Error(
+                    "SD0671",
+                    $"'uniform {type} {name}' cannot be lowered to a float uniform because it is {why}. " +
+                    "Declare it on its own as a plain 'uniform float' (or 'half') and convert in the shader.",
+                    line, col, name));
+                continue;
+            }
+
+            if (HasOtherDeclaration(source, name, nameGroup.Index))
+            {
+                Locate(source, nameGroup.Index, out int line, out int col);
+                diagnostics.Add(Error(
+                    "SD0671",
+                    $"'uniform {type} {name}' cannot be lowered to a float uniform because '{name}' is also " +
+                    "declared as a local or parameter. Rename one of them.",
+                    line, col, name));
+                continue;
+            }
+
+            lowered[name] = type;
+            declNames.Add(nameGroup.Index);
+            Group t = m.Groups["t"];
+            edits.Add((t.Index, t.Length, type.Length > 1 && char.IsDigit(type[^1]) ? "float" + type[^1] : "float"));
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            return source;
+        }
+
+        foreach (Match m in Identifier.Matches(source))
+        {
+            if (!lowered.TryGetValue(m.Value, out string? type) || declNames.Contains(m.Index))
+            {
+                continue;
+            }
+
+            int prev = m.Index - 1;
+            while (prev >= 0 && char.IsWhiteSpace(source[prev]))
+            {
+                prev--;
+            }
+
+            if (prev >= 0 && source[prev] == '.')
+            {
+                continue; // a struct field or swizzle that happens to share the name
+            }
+
+            edits.Add((m.Index, m.Length, $"{type}({m.Value})"));
+        }
+
+        var sb = new StringBuilder(source);
+        foreach ((int index, int length, string text) in edits.OrderByDescending(e => e.Index))
+        {
+            sb.Remove(index, length);
+            sb.Insert(index, text);
+        }
+
+        return sb.ToString();
+    }
+
+    private static readonly string[] DeclarableTypes = BuildDeclarableTypes();
+
+    /// <summary>True when <paramref name="name"/> is declared again (a local or parameter) elsewhere than at <paramref name="uniformNameIndex"/>.</summary>
+    private static bool HasOtherDeclaration(string source, string name, int uniformNameIndex)
+    {
+        var declaration = new Regex(
+            @"\b(?:" + string.Join("|", DeclarableTypes) + @")\s+" + Regex.Escape(name) + @"\b");
+        return declaration.Matches(source).Any(m => m.Index + m.Length - name.Length != uniformNameIndex);
+    }
+
+    private static string[] BuildDeclarableTypes() =>
+        Types.Keys
+            .Concat(new[] { "int", "float", "bool", "uint" })
+            .Concat(Enumerable.Range(2, 3).SelectMany(n => new[] { $"vec{n}", $"ivec{n}", $"bvec{n}", $"uvec{n}", $"mat{n}" }))
+            .Select(Regex.Escape)
+            .ToArray();
+
+    /// <summary>Require exactly one <c>half4 main(float2)</c>; name the SkSL shape of anything else.</summary>
+    private static void CheckEntry(string source, List<ConvertDiagnostic> diagnostics)
+    {
+        MatchCollection mains = MainCall.Matches(source);
+        if (mains.Count == 0)
+        {
+            diagnostics.Add(Error(
+                "SD0661",
+                "No 'half4 main(float2 coord)' entry point was found. Only SkSL shaders (not color filters " +
+                "or blenders) are supported.", 0, 0, "main"));
+            return;
+        }
+
+        if (mains.Count > 1)
+        {
+            Locate(source, mains[1].Index, out int l, out int c);
+            diagnostics.Add(Error("SD0662", "Multiple 'main' definitions found.", l, c, "main"));
+            return;
+        }
+
+        if (EntryDecl.IsMatch(source))
+        {
+            return;
+        }
+
+        Locate(source, mains[0].Index, out int line, out int col);
+        string[] parameters = ParameterTypes(source, mains[0].Index + mains[0].Length);
+        if (parameters.Length == 1 && ColorVectors.Contains(parameters[0]))
+        {
+            diagnostics.Add(Error(
+                "SD0663",
+                "This is an SkSL color filter ('half4 main(half4 color)'); only shaders ('half4 main(float2 " +
+                "coord)') are supported. Apply the filter's math to the color inside a shader instead.",
+                line, col, "main"));
+        }
+        else if (parameters.Length == 2 && ColorVectors.Contains(parameters[0]) && ColorVectors.Contains(parameters[1]))
+        {
+            diagnostics.Add(Error(
+                "SD0664",
+                "This is an SkSL blender ('half4 main(half4 src, half4 dst)'); only shaders ('half4 main(float2 " +
+                "coord)') are supported. A blender has no MonoGame equivalent: use a BlendState, or a shader " +
+                "that samples the destination as a child.",
+                line, col, "main"));
+        }
+        else
+        {
+            diagnostics.Add(Error(
+                "SD0665",
+                "An SkSL shader's entry must be 'half4 main(float2 coord)' (or float4/vec4 and half2/vec2): " +
+                "it takes one coordinate and returns a premultiplied color.",
+                line, col, "main"));
+        }
+    }
+
+    /// <summary>The type word of each comma-separated parameter after <c>main(</c> (qualifiers skipped).</summary>
+    private static string[] ParameterTypes(string source, int open)
+    {
+        int close = source.IndexOf(')', open);
+        string list = close < 0 ? source[open..] : source[open..close];
+        return list.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault(w => w is not ("const" or "in" or "out" or "inout")) ?? string.Empty)
+            .ToArray();
+    }
+
+    /// <summary>Reject identifiers this frontend does not support or reserves, once per name, at the first use.</summary>
+    private static void ScanIdentifiers(string source, List<string> children, List<ConvertDiagnostic> diagnostics)
+    {
+        var childDeclShaderKeywords = new HashSet<int>(
+            ChildDecl.Matches(source).Select(m => source.IndexOf("shader", m.Index, StringComparison.Ordinal)));
+        var texelSizes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string child in children)
+        {
+            texelSizes[child + TexelSizeSuffix] = child;
+        }
+
+        var reported = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in Identifier.Matches(source))
+        {
+            if (m.Value == "shader" && childDeclShaderKeywords.Contains(m.Index))
+            {
+                continue;
+            }
+
+            (string Code, string Message)? bad = Unsupported(m.Value, texelSizes);
+            if (bad is not null && reported.Add(m.Value))
+            {
+                Locate(source, m.Index, out int line, out int col);
+                diagnostics.Add(Error(bad.Value.Code, bad.Value.Message, line, col, m.Value));
+            }
+        }
+
+        foreach (Match m in AnyEval.Matches(source))
+        {
+            string name = m.Groups["n"].Value;
+            if (!children.Contains(name) && reported.Add(name + ".eval"))
+            {
+                Locate(source, m.Index, out int line, out int col);
+                diagnostics.Add(Error(
+                    "SD0668",
+                    $"'{name}.eval' does not name a 'uniform shader' child; only globals declared " +
+                    "'uniform shader name;' can be evaluated.",
+                    line, col, name + ".eval"));
+            }
+        }
+
+        // A child that is never evaluated gets no texture parameter in the compiled effect, and
+        // every child after it moves down a texture slot. The host draws the FIRST child as the
+        // sprite (SpriteBatch owns slot 0), so with an unused first child the shader would read
+        // the wrong texture and nothing would say so.
+        var evaluated = new HashSet<string>(AnyEval.Matches(source).Select(m => m.Groups["n"].Value), StringComparer.Ordinal);
+        foreach (Match m in ChildDecl.Matches(source))
+        {
+            string child = m.Groups["n"].Value;
+            if (!evaluated.Contains(child) && reported.Add(child + " unused"))
+            {
+                Locate(source, m.Groups["n"].Index, out int line, out int col);
+                diagnostics.Add(Error(
+                    "SD0669",
+                    $"'uniform shader {child};' is never evaluated. Remove it: a child the shader does not " +
+                    "sample gets no texture parameter, and the children declared after it would be bound " +
+                    "one texture slot early.",
+                    line, col, child));
+            }
+        }
+    }
+
+    private static (string Code, string Message)? Unsupported(string name, Dictionary<string, string> texelSizes)
+    {
+        switch (name)
+        {
+            case "sk_FragCoord":
+                return U("SD0666", "sk_FragCoord is not supported: Skia's runtime shaders (SkiaSharp 3 and later) do not " +
+                       "accept it either. Use the coordinate passed to main (the pixel coordinate when the " +
+                       "shader is drawn untransformed).");
+            case "layout":
+                return U("SD0666", "layout(color) uniforms are not supported yet; declare a plain half4/float4 uniform " +
+                       "and set it to the color already in the destination's color space (for an untagged " +
+                       "surface, the sRGB values).");
+            case "unpremul":
+                return U("SD0666", "unpremul() is not supported yet; divide instead: half4(c.rgb / max(c.a, 0.0001), c.a).");
+            case "toLinearSrgb":
+            case "fromLinearSrgb":
+                return U("SD0666", $"{name}() is not supported: the converted shader has no working color space. Do the " +
+                       "conversion on the host or write the transfer function out.");
+            case "colorFilter":
+            case "blender":
+                return U("SD0666", $"'{name}' children are not supported yet; only 'uniform shader' children are.");
+            case "shader":
+                return U("SD0666", "'shader' is only supported as a global 'uniform shader name;' evaluated with " +
+                       "name.eval(coord). To pass a child to a function, call eval at the call site and " +
+                       "pass the color.");
+        }
+
+        if (name.StartsWith("sk_", StringComparison.Ordinal))
+        {
+            return U("SD0666", $"'{name}' is not an SkSL built-in this converter supports.");
+        }
+
+        if (name.StartsWith("sd_", StringComparison.Ordinal))
+        {
+            return U("SD0667", $"'{name}' is reserved: the 'sd_' prefix belongs to the SkSL-to-.fx conversion. Rename this identifier.");
+        }
+
+        if (name.StartsWith("gl_", StringComparison.Ordinal))
+        {
+            return U("SD0667", $"'{name}' is a GLSL built-in, not SkSL; use the coordinate passed to main.");
+        }
+
+        if (texelSizes.TryGetValue(name, out string? child))
+        {
+            return U("SD0667", $"'{name}' is reserved: the converter declares it for child shader '{child}' (the host " +
+                   "sets it to 1 / the child's size in pixels). Rename this identifier.");
+        }
+
+        if (UniformInfo.IsUniform(name) || ReservedNames.Contains(name))
+        {
+            return U("SD0667", $"'{name}' is reserved by the SkSL-to-.fx conversion (the host drives it); rename this identifier.");
+        }
+
+        Match nonSquare = NonSquareMatrix.Match(name);
+        if (nonSquare.Success && nonSquare.Groups[1].Value != nonSquare.Groups[2].Value)
+        {
+            return U("SD0666", $"Non-square matrix types ('{name}') are not supported yet.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// <c>img.eval(p)</c> becomes <c>sd_ChildColor(texture(img, (p) * imgTexelSize))</c>. Matches are rewritten right to
+    /// left, so each match still sits at its original index (diagnostics stay located) and a nested eval
+    /// inside an argument is already rewritten when its enclosing call is copied.
+    /// </summary>
+    private static string RewriteEvals(string source, List<string> children, List<ConvertDiagnostic> diagnostics)
+    {
+        if (children.Count == 0)
+        {
+            return source;
+        }
+
+        var call = new Regex(@"\b(?<n>" + string.Join("|", children.Select(Regex.Escape)) + @")\s*\.\s*eval\s*\(");
+        var sb = new StringBuilder(source);
+        foreach (Match m in call.Matches(source).Reverse())
+        {
+            int open = m.Index + m.Length;
+            int depth = 1, i = open;
+            while (i < sb.Length && depth > 0)
+            {
+                depth += sb[i] == '(' ? 1 : sb[i] == ')' ? -1 : 0;
+                i++;
+            }
+
+            string n = m.Groups["n"].Value;
+            if (depth != 0)
+            {
+                Locate(source, m.Index, out int line, out int col);
+                diagnostics.Add(Error("SD0670", $"Unbalanced parentheses in '{n}.eval('.", line, col, n + ".eval"));
+                return source;
+            }
+
+            string arg = sb.ToString(open, i - 1 - open).Trim();
+            sb.Remove(m.Index, i - m.Index);
+            sb.Insert(m.Index, $"{ChildColor}(texture({n}, ({arg}) * {n}{TexelSizeSuffix}))");
+        }
+
+        return sb.ToString();
+    }
+
+    private static void Locate(string text, int index, out int line, out int col)
+    {
+        line = 1;
+        col = 1;
+        for (int i = 0; i < index && i < text.Length; i++)
+        {
+            if (text[i] == '\n')
+            {
+                line++;
+                col = 1;
+            }
+            else if (text[i] != '\r')
+            {
+                col++;
+            }
+        }
+    }
+
+    private static (string Code, string Message) U(string code, string message) => (code, message);
+
+    private static ConvertDiagnostic Error(string code, string message, int line, int col, string construct) =>
+        new(DiagnosticSeverity.Error, message, line, col, construct, code);
+
+    private static ConvertResult Fail(IReadOnlyList<ConvertDiagnostic> diagnostics) => new()
+    {
+        Success = false,
+        Fx = null,
+        Diagnostics = diagnostics,
+        UsedUniforms = Array.Empty<string>(),
+    };
+
+    private static Dictionary<string, string> BuildTypes()
+    {
+        var d = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["half"] = "float",
+            ["short"] = "int",
+            ["ushort"] = "uint",
+        };
+
+        foreach (string scalar in new[] { "half", "float" })
+        {
+            for (int n = 2; n <= 4; n++)
+            {
+                d[$"{scalar}{n}"] = $"vec{n}";
+                d[$"{scalar}{n}x{n}"] = $"mat{n}";
+            }
+        }
+
+        for (int n = 2; n <= 4; n++)
+        {
+            d[$"int{n}"] = $"ivec{n}";
+            d[$"short{n}"] = $"ivec{n}";
+            d[$"uint{n}"] = $"uvec{n}";
+            d[$"ushort{n}"] = $"uvec{n}";
+            d[$"bool{n}"] = $"bvec{n}";
+        }
+
+        return d;
+    }
+}

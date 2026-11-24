@@ -4,7 +4,7 @@ This is the human runbook for cutting a ShadowDusk release. The `/release` skill
 (`.claude/skills/release/SKILL.md`) automates every step below; this document is the
 ground truth it follows, and the fallback when you cut a release by hand.
 
-A release publishes **all ten** `ShadowDusk.*` NuGet packages plus the `ShadowDuskCLI` `dotnet tool`
+A release publishes **all eleven** `ShadowDusk.*` NuGet packages plus the `ShadowDuskCLI` `dotnet tool`
 to nuget.org, and attaches self-contained CLI binaries for each RID to a GitHub Release.
 
 | Package | What it is |
@@ -13,6 +13,7 @@ to nuget.org, and attaches self-contained CLI binaries for each RID to a GitHub 
 | `ShadowDusk.HLSL` | FX9 pre-parser, DXC integration, vkd3d-shader / `d3dcompiler_47` DXBC backends |
 | `ShadowDusk.GLSL` | SPIR-V → GLSL via SPIRV-Cross + MojoShader-dialect rewriter |
 | `ShadowDusk.ShaderToy` | Standalone pure-managed ShaderToy/GLSL → `.fx` converter (optional; not in the `Compiler` graph) |
+| `ShadowDusk.SkSL` | Standalone pure-managed SkSL → `.fx` converter and `ShaderConverter` frontend for `.sksl` input (optional; depends on `ShadowDusk.ShaderToy`, not in the `Compiler` graph; issue #506) |
 | `ShadowDusk.Slang` | Optional real-slangc Slang front-end (Phase 66). Depends on `ShadowDusk.Compiler`; carries slangc for win-x64, linux-x64, osx-x64, osx-arm64 under `runtimes/<rid>/native/` (~53 MB nupkg), gated by `release.yml`. |
 | `ShadowDusk.Compiler` | The consumer-facing product library (`EffectCompiler : IShaderCompiler`) |
 | `ShadowDusk.Cli` | The `ShadowDuskCLI` `dotnet tool` |
@@ -38,20 +39,24 @@ to nuget.org, and attaches self-contained CLI binaries for each RID to a GitHub 
    successful publish; this repo is public. A 403 at **NuGet Push** now means the policy is
    missing, inactive, or no longer matches the workflow file name.
 
-2. **nuget.org owner rights on all ten package IDs.** You must be an owner (or have push
+2. **nuget.org owner rights on all eleven package IDs.** You must be an owner (or have push
    rights) of every ID — `ShadowDusk.Core`, `ShadowDusk.HLSL`, `ShadowDusk.GLSL`,
-   `ShadowDusk.ShaderToy`, `ShadowDusk.Slang`, `ShadowDusk.Compiler`, `ShadowDusk.Cli`,
+   `ShadowDusk.ShaderToy`, `ShadowDusk.SkSL`, `ShadowDusk.Slang`, `ShadowDusk.Compiler`, `ShadowDusk.Cli`,
    `ShadowDusk.Wasm`, `ShadowDusk.MgcbPlugin`, `ShadowDusk.ContentPipeline`. The
-   **first** publish of each ID reserves the name to your account; confirm all ten are
+   **first** publish of each ID reserves the name to your account; confirm all eleven are
    reserved before relying on the automated push (an unreserved ID makes the `dotnet nuget
    push` for that package fail). `ShadowDusk.ShaderToy` is **new in 0.9.0**,
    `ShadowDusk.MgcbPlugin` is **new in the first release after Phase 29**, and
    `ShadowDusk.ContentPipeline` is **new in the first release after Phase 63** (issue #203), and
-   `ShadowDusk.Slang` is **new in the first release after Phase 66**, so
+   `ShadowDusk.Slang` is **new in the first release after Phase 66**, and
+   `ShadowDusk.SkSL` is **new in the first release after issue #506**, so
    their first publish reserves those IDs — the glob-scoped key in step 1 already covers them.
 
 3. **A green `main`.** CI (`ci.yml`) runs the 3-OS build + test matrix on every push/PR.
-   Releases cut from `main` only after CI is green; local green is not sufficient.
+   Releases cut from `main` only after CI is green. `release.yml` enforces it: its `verify-ci` job
+   fails unless `ci.yml` and `validation-render.yml` have a successful run on the release commit (or,
+   when a workflow's path filter skipped that commit, on the newest earlier commit that triggers it).
+   There is no local build or test step in a release: PR CI already runs the full suite on three OSes.
 
 4. **Local tooling the render gate needs — install this BEFORE reading a red gate as a
    divergence.** The gate script needs **PowerShell 7** (`pwsh`; `tools/restore.ps1` carries
@@ -91,15 +96,15 @@ to nuget.org, and attaches self-contained CLI binaries for each RID to a GitHub 
    `KniVsDriven`, the MGCB plugin / XNB / Content Builder gates,
    the Slang DX12/Vulkan/FNA arms, and browser-ANGLE (CI's browser smoke renders on SwiftShader,
    blind to ANGLE-D3D11 behavior like the issue-#136 gradient poisoning). No GPU driver is ever
-   exercised in CI. **`release.yml` does not check any of this either**, so this gate is the only
-   thing between a render regression and nuget.org. Run it on
+   exercised in CI. **`release.yml` checks only the CI-run part (`validation-render.yml`), not the
+   GPU gate**, so this gate is the only thing between a GPU-only render regression and nuget.org. Run it on
    a Windows box with a **DX12-capable GPU** (the DirectX 12 gates are default-ON; Vulkan-capable
    too, unless `-SkipVulkan`) **before** bumping the version — it is the longest and most likely step
    to fail, so a divergence should stop the release before any version churn, commit, PR, or CI
    time is spent:
 
    ```powershell
-   ./validation/run-windows-render-gates.ps1              # DX corpus (vkd3d + d3dcompiler arms) + DX-modern (VTF, legacy-register, half-globals, legacy texture-slot and legacy-lod arms) + DX Apos gallery + DX resource arrays (issues #339/#340: texture-array table + render, sampler-array SD0224 refusal) + DX ShaderToy route + DX12 corpus + DX12 VS-driven/Apos gallery + DX12 texture-array row (issue #324) + DX12 legacy-lod + KNI-DX (incl. legacy texture slots) + KNI-GL desktop + KNI-GL VS-driven + Skia vs KNI (SkSL, issue #369) + non-square matrix Set on WindowsDX and DesktopVK (issue #423) + GL vertex semantics + matrix interpolants (VertexSemanticsGl, VertexSemanticsKniGl) + GL Apos + GL Apos gallery + ANGLE-D3D11 derivative probe (issue #136) + MGCB plugin (real dotnet mgcb 3.8.4.1, 3.8.5 AND 3.8.6, decoy-PATH DXC guard) + XNB direct writer Content.Load on MonoGame WindowsDX, MonoGame DesktopGL and KNI 4.2.9001+4.3.9001 + MonoGame 3.8.5 Content Builder (ShadowDusk.ContentPipeline, real ContentBuilder + Content.Load<Effect>) + Slang corpus + Slang full corpus (ShadowDusk.Slang real-slangc route; DX11, DX12 and Vulkan real-Effect arms, issue #230) + Slang textured GL (issue #252) + the Vulkan block (CandidateVulkan, InitializerDefaultsVulkan, NonSquareMatrixVulkan, KniEffectTestVulkan, VsDrivenVulkan vs/apos/texarr/legacy-lod/regslots, SlangFullCorpusVulkan) + the six InitializerDefaults drivers (global initializer = default with no Set, every MGFX/KNIFX runtime) + the KNI EffectTest drivers (KNI's own EffectTest.cs on KNI 4.2.9001+4.3.9001 GL/DX and MonoGame GL/DX/DX12/Vulkan; gated + known-failing rows) + the newer-MonoGame block (every MonoGame gate again on 3.8.6 via -p:MonoGameVersion, plus the DesktopGL4 arm and the 3.8.6 Content Builder; -NewerMonoGameOnly runs just it), vs mgfxc/fxc
+   ./validation/run-windows-render-gates.ps1              # DX corpus (vkd3d + d3dcompiler arms) + DX-modern (VTF, legacy-register, half-globals, legacy texture-slot and legacy-lod arms) + DX Apos gallery + DX resource arrays (issues #339/#340: texture-array table + render, sampler-array SD0224 refusal) + DX ShaderToy route + DX12 corpus + DX12 managed-DXIL-signature (ManagedDxilDx12, #478) + DX12 VS-driven/Apos gallery + DX12 texture-array row (issue #324) + DX12 legacy-lod + KNI-DX (incl. legacy texture slots) + KNI-GL desktop + KNI-GL VS-driven + Skia vs KNI (SkSL, issue #369) + SkSL input vs GL (SkSLVsGl, Phase 71) + non-square matrix Set on WindowsDX and DesktopVK (issue #423) + GL vertex semantics + matrix interpolants (VertexSemanticsGl, VertexSemanticsKniGl) + GL Apos + GL Apos gallery + ANGLE-D3D11 derivative probe (issue #136) + MGCB plugin (real dotnet mgcb 3.8.4.1, 3.8.5 AND 3.8.6, decoy-PATH DXC guard) + XNB direct writer Content.Load on MonoGame WindowsDX, MonoGame DesktopGL and KNI 4.2.9001+4.3.9001 + MonoGame 3.8.5 Content Builder (ShadowDusk.ContentPipeline, real ContentBuilder + Content.Load<Effect>) + Slang corpus + Slang full corpus (ShadowDusk.Slang real-slangc route; DX11, DX12 and Vulkan real-Effect arms, issue #230) + Slang textured GL (issue #252) + the Vulkan block (CandidateVulkan, InitializerDefaultsVulkan, NonSquareMatrixVulkan, KniEffectTestVulkan, VsDrivenVulkan vs/apos/texarr/legacy-lod/regslots, SlangFullCorpusVulkan) + the six InitializerDefaults drivers (global initializer = default with no Set, every MGFX/KNIFX runtime) + the KNI EffectTest drivers (KNI's own EffectTest.cs on KNI 4.2.9001+4.3.9001 GL/DX and MonoGame GL/DX/DX12/Vulkan; gated + known-failing rows) + the newer-MonoGame block (every MonoGame gate again on 3.8.6 via -p:MonoGameVersion, plus the DesktopGL4 arm and the 3.8.6 Content Builder; -NewerMonoGameOnly runs just it), vs mgfxc/fxc
    ./validation/run-windows-render-gates.ps1 -IncludeFna  # also FNA fx_2_0 + its Slang arm + initializer defaults on D3D11 and OpenGL, for an FNA-affecting release (include it when in doubt)
    ```
 
@@ -108,6 +113,9 @@ to nuget.org, and attaches self-contained CLI binaries for each RID to a GitHub 
    `-SkipVulkan` opts out and is ONLY for a box without one (`-IncludeVulkan` is still accepted
    as a no-op). If the machine is not Windows or has no GPU, say so and stop: `dotnet test`
    alone is not a basis for releasing.
+
+   The script prints each gate's time and the total. Measured 2026-11-14 on a 16-core box
+   with an RTX 3080 and warm NuGet and build caches: 62 gates with `-IncludeFna` in 19 min.
 
    A non-zero exit means a render diverged from `mgfxc`/`fxc` — **do not release.** (The
    in-process OpenGL render gates DO run in CI via `validation-render.yml`, so they are covered
@@ -124,22 +132,24 @@ ShadowDusk's package version lives in **exactly one place**:
 ```xml
 <!-- Directory.Build.props -->
 <PropertyGroup>
-  <Version>0.25.1</Version>
+  <Version>0.27.0</Version>
 </PropertyGroup>
 ```
 
 That single `<Version>` flows to every `ShadowDusk.*` project, so `dotnet pack` stamps all
-ten packages (and their inter-package dependency ranges) at the same version.
+eleven packages (and their inter-package dependency ranges) at the same version.
 
-> **Do NOT edit the ten `.csproj` files.** They no longer carry a per-project version.
+> **Do NOT edit the eleven `.csproj` files.** They no longer carry a per-project version.
 > Editing one csproj and not the others is exactly the desync this centralization removes.
 > (The `<PackageVersion Include=… />` *items* in `Directory.Packages.props` are unrelated —
 > those pin third-party dependency versions under Central Package Management. Leave them
 > alone.)
 
-To bump for a release, change that one line (e.g. `0.25.0` → `0.25.1`), update
-`CHANGELOG.md` (move `[Unreleased]` into a dated `[0.25.1]` section, leave a fresh empty
-`[Unreleased]`), update the version examples in this file, commit, and merge to `main` via PR.
+To bump for a release, run `tools/bump-version.sh <version>` (bash, repo root, clean tree on the
+release branch). It sets that one line, rewrites the `ShadowDusk.*` ranges in every lock file,
+moves `CHANGELOG.md` `[Unreleased]` into a dated `[<version>]` section with a fresh empty
+`[Unreleased]` and the link references, updates the version examples in this file, and runs
+`tools/check-lock-files.sh`. Then commit and merge to `main` via PR.
 
 ---
 
@@ -154,21 +164,18 @@ so a stale one ships silently. Check all three:
   diagram. Quick check: `git log -1 --format=%cd docs/pipeline-overview.puml` vs the same for
   `docfx/images/pipeline-overview.svg`.
 - **`plan/PHASE-41-appendix/structural-divergence-matrix.md`** — no longer needs a release-time
-  refresh (issue #361): it carries no version stamp, and the pre-release full-suite run FAILS if
+  refresh (issue #361): it carries no version stamp, and PR CI's full suite FAILS if
   it is stale rather than rewriting it. If that test fails, regenerate it as `project_rules.md`
   says, review the diff (a changed divergence cell is a real signal, not noise) and commit it.
 - **Every `packages.lock.json`**, including versioned names such as
   `validation/KniXnbContentLoad/packages.4.3.9001.lock.json` (issues #258, #290). Each records the `ShadowDusk.*` project-reference
   ranges at the version current when it was last regenerated, and neither a normal restore nor
   CI's `--locked-mode` restore rewrites or rejects a stale one (0.19.0 and 0.20.0 both shipped
-  with lock files still saying `[0.18.0, )`). In the version-bump commit, rewrite them in place
-  (bash, repo root; `OLD`/`NEW` are the versions):
-  `git ls-files '*packages*.lock.json' | xargs sed -i -E 's/("ShadowDusk\.[A-Za-z.]+": "\[)OLD(, \)")/\1NEW\2/'`,
-  then confirm `git grep -h -o -E '"ShadowDusk\.[A-Za-z.]+": "\[[0-9.]+, \)"' -- '*packages*.lock.json' | sort | uniq -c`
-  lists only `NEW`. Prefer this to `dotnet restore --force-evaluate`, which also drops project
-  references whose source is not restored on your box (`validation/FnaValidation`'s
-  `external/FNA`). Finally run `tools/check-lock-files.sh`: it locked-restores every tracked lock
-  file (the `Lock files` CI job runs the same script, issue #291).
+  with lock files still saying `[0.18.0, )`). `tools/bump-version.sh` rewrites them in place in the version-bump commit, fails if any
+  `ShadowDusk.*` range is left at another version, and then runs `tools/check-lock-files.sh`, which
+  locked-restores every tracked lock file (the `Lock files` CI job runs the same script, issue #291).
+  It does not use `dotnet restore --force-evaluate`, which also drops project references whose
+  source is not restored on your box (`validation/FnaValidation`'s `external/FNA`).
 
 The `/release` skill's docs-audit step checks all three as a backstop, but the backstop catching
 drift is a process failure.
@@ -176,7 +183,7 @@ drift is a process failure.
 **Doc drift is fixed before the release, never deferred** (owner directive, 2026-10-29: "Always
 fix doc issues before the release."). The `/release` docs audit (step 7 of the skill) can run as a
 separate read-only agent, but every finding it reports is fixed on the release branch, each claim
-verified against the code or CI, before the build-and-test run and the release commit. If a fix
+verified against the code or CI, before the release commit. If a fix
 cannot land yet, the release stops and the owner decides.
 
 ---
@@ -190,7 +197,7 @@ marker; the workflow creates and pushes it itself on a successful release).
 ### Manual dispatch (the only trigger)
 
 After the version-bump PR is merged to `main`: **Actions → Release → Run workflow**, and
-enter the `version` input (e.g. `0.25.1`, no leading `v`). On dispatch the workflow also
+enter the `version` input (e.g. `0.27.0`, no leading `v`). On dispatch the workflow also
 creates and pushes the matching `v<version>` tag so the GitHub Release anchors to a tag.
 
 ### The `validate` guard (input ↔ version)
@@ -206,10 +213,15 @@ first (the `/release` skill does this for you).
 ## What the workflow does
 
 1. **`validate`** — resolve + verify the version against `Directory.Build.props`.
-2. **build + test** on the 3-OS matrix (Linux / macOS / Windows).
-3. **publish** self-contained `ShadowDuskCLI` binaries per RID (`win-x64`, `linux-x64`, `osx-x64`,
+2. **`verify-ci`** — fails unless `ci.yml` and `validation-render.yml` are green on the release
+   commit (see Prerequisites item 3). Everything below needs it.
+   **`pack-consume`, `win-arm64` and `android-emulator`** run in the same dispatch, called from
+   `release.yml` with `workflow_call`; `nuget-push` needs all three, so there is nothing to
+   dispatch by hand first.
+3. **build + test** on the 3-OS matrix (Linux / macOS / Windows).
+4. **publish** self-contained `ShadowDuskCLI` binaries per RID (`win-x64`, `linux-x64`, `osx-x64`,
    `osx-arm64`) and archive them.
-4. **pack + push** all ten `ShadowDusk.*` packages (`.nupkg` + `.snupkg` symbols) to
+5. **pack + push** all eleven `ShadowDusk.*` packages (`.nupkg` + `.snupkg` symbols) to
    nuget.org at the validated version, with `--skip-duplicate` (re-running a release no-ops
    on already-published versions). `ShadowDusk.Wasm` is packed in the WASM job (it needs the
    `wasm-tools` workload + restored `dxcompiler.wasm`); `ShadowDusk.MgcbPlugin` is packed in
@@ -218,20 +230,20 @@ first (the `/release` skill does this for you).
    otherwise) and on **not** carrying `MonoGame.Framework.Content.Pipeline.dll`;
    `ShadowDusk.ContentPipeline` is gated the opposite way, on shipping `lib/net8.0/` and on
    **declaring** its `MonoGame.Framework.Content.Pipeline` + `ShadowDusk.Compiler` dependencies.
-5. **GitHub Release** — create the release for the `v<version>` tag with the four CLI
+6. **GitHub Release** — create the release for the `v<version>` tag with the four CLI
    archives + the `.nupkg`/`.snupkg` set attached.
 
 ---
 
 ## Verify after release
 
-1. **nuget.org shows all ten at the new version.** Check each of
-   `ShadowDusk.{Core,HLSL,GLSL,ShaderToy,Slang,Compiler,Cli,Wasm,MgcbPlugin,ContentPipeline}` is listed at `<version>`
+1. **nuget.org shows all eleven at the new version.** Check each of
+   `ShadowDusk.{Core,HLSL,GLSL,ShaderToy,SkSL,Slang,Compiler,Cli,Wasm,MgcbPlugin,ContentPipeline}` is listed at `<version>`
    (indexing can take a few minutes after push).
 2. **The `ShadowDuskCLI` tool installs and runs:**
 
    ```bash
-   dotnet tool install -g ShadowDusk.Cli --version 0.25.1
+   dotnet tool install -g ShadowDusk.Cli --version 0.27.0
    ShadowDuskCLI --help
    ```
 
@@ -239,11 +251,12 @@ first (the `/release` skill does this for you).
 3. **The consumer (GL) self-contained path works on a clean machine:**
 
    ```bash
-   dotnet add package ShadowDusk.Compiler --version 0.25.1
+   dotnet add package ShadowDusk.Compiler --version 0.27.0
    ```
 
-   then compile a `.fx` → GL `.mgfx` in memory. This restores `Core/HLSL/GLSL` plus
-   `Vortice.Dxc` and `Silk.NET.SPIRV.Cross.Native` transitively — no manual native install.
+   then compile a `.fx` → GL `.mgfx` in memory. This restores `Core/HLSL/GLSL` (the DXC natives
+   ride inside `ShadowDusk.HLSL`) plus the managed `Vortice.Dxc` wrapper and
+   `Silk.NET.SPIRV.Cross.Native` transitively — no manual native install.
 4. **The GitHub Release** exists for `v<version>` with the four self-contained CLI archives
    and the package set attached.
 
@@ -270,10 +283,17 @@ first (the `/release` skill does this for you).
 > broken for any consumer RID. If the gate trips, check that the `native-vkd3d-2.1`
 > release assets are intact and the restore-step log shows four "hash OK" lines.
 
+> **Windows DXC natives (Phase 70):** `tools/restore.{ps1,sh}` restore `dxcompiler.dll` and
+> `dxil.dll` for win-x64 and win-arm64, SHA-256 pinned, from `native-dxc-1.9.2607`. They are our
+> builds of the DXC v1.9.2607 tag (`dxc-build.yml`). Linux and macOS DXC come from
+> `MonoGame.Tool.Dxc` by `PackageDownload`. A pack without the restored Windows files ships no
+> Windows DXC, so `release.yml` and `ci.yml` gate on them. No binary from Microsoft's DXC release
+> may be packed (`project_decisions.md`).
+
 > **Android natives (Phase 50, issue #304):** `tools/restore.{ps1,sh}` also restore four Android
 > `.so` files, SHA-256 pinned, all reproducible CI builds with 16 KB pages (Google Play's
 > requirement for Android 15+ targets; the emulator lane fails on `XA0141`): DXC from
-> `native-dxc-android-1.7.2212.40-16k` (built by `dxc-android-build.yml` with
+> `native-dxc-1.9.2607` (built by `dxc-android-build.yml` with
 > `tools/build-dxc-android.sh` at the pinned DXC commit), SPIRV-Cross from
 > `native-spirv-cross-android-d8e3e2b1` (built by `spirv-cross-android-build.yml` with
 > `tools/build-spirv-cross-android.sh` at the desktop's SPIRV-Cross commit; a SPIRV-Cross bump on
@@ -281,8 +301,7 @@ first (the `/release` skill does this for you).
 > DXC + SPIRV-Cross pack into `ShadowDusk.HLSL` / `ShadowDusk.GLSL` under
 > `runtimes/android-arm64/native/` (gated by `release.yml` and `pack-consume.yml`); the
 > `android-x64` pair is restored only for the emulator lane (`android-emulator.yml`) and is never
-> packed. **Before dispatching**, confirm the `Android emulator` workflow is green on the release
-> commit (`gh workflow run android-emulator.yml --ref main` if the last run is older): it is the
+> packed. `release.yml` runs the `Android emulator` workflow itself and `nuget-push` needs it: it is the
 > only run of the on-device compile and the Android identity checks. If any Android native is
 > rebuilt, upload it as a NEW asset (never replace one), re-pin its SHA-256 in both restore
 > scripts AND its GNU build id in `DxcNativeIdentity` / `SpvcLoader.AndroidBuildIdByRid`
@@ -297,9 +316,8 @@ first (the `/release` skill does this for you).
 > or `THIRD-PARTY-NOTICES.txt` (exact entry names). The list lives in ONE script,
 > `tools/verify-slang-nupkg.sh`, which `tools/verify-slang-packaging.sh` (pack-consume.yml) runs
 > too; to check a locally packed nupkg, `bash tools/verify-slang-nupkg.sh <path/to/nupkg>` (exits
-> 1 naming each missing entry). **Before dispatching**, confirm the
-> `Pack & Consume Smoke` workflow is green on the release commit (dispatch it if the last run is
-> older): its `tools/verify-slang-packaging.sh` step is the only proof that a cold consumer can
+> 1 naming each missing entry). `release.yml` runs
+> `Pack & Consume Smoke` itself and `nuget-push` needs it: its `tools/verify-slang-packaging.sh` step is the only proof that a cold consumer can
 > install the package and run slangc on Linux, macOS and Windows, and its macOS
 > `tools/verify-slang-osx-x64-rosetta.sh` step is the only run of the packaged **osx-x64** slangc
 > (under Rosetta 2, output byte-identical to osx-arm64; issue #352). Host floors are upstream's:
@@ -307,9 +325,8 @@ first (the `/release` skill does this for you).
 
 > **win-arm64 (issue #286):** the core pipeline as a native arm64 process (byte identity with
 > win-x64) and `ShadowDusk.Slang`'s `SD0620` there run only in the `win-arm64` workflow
-> (`windows-11-arm`). Before dispatching, run it on the branch or tag that points at the release
-> commit (`gh workflow run win-arm64.yml --ref main`; `--ref` takes a branch or tag, not a SHA),
-> check the run's head SHA is the release commit, and wait for green. No win-arm64 slangc is packed.
+> (`windows-11-arm`). `release.yml` runs it on the release commit and `nuget-push` needs it.
+> No win-arm64 slangc is packed.
 
 ---
 

@@ -6,7 +6,7 @@
 //
 // THIS IS THE PRODUCT FRONTEND (Phase 23, Option A). It wraps the pinned desktop
 // DirectXShaderCompiler compiled to WebAssembly — the SAME compiler + version the
-// desktop pipeline uses (Vortice.Dxc 3.3.4 == DXC 1.7.2212.40, commit e043f4a1) —
+// desktop pipeline uses (DXC v1.9.2607, commit 0d3ee6b5) —
 // so its SPIR-V is byte-identical to the desktop CLI on the corpus (node gate
 // .wasm-build/node-test-dxc-wasm.mjs == 10/10). Because the bytes are identical to
 // the desktop-validated compiler, the in-browser render is transitively proven.
@@ -33,7 +33,7 @@
 // dxc-dlopen-stub.js), so this shim needs no extra files.
 //
 // The [JSImport] compileToSpirv is SYNCHRONOUS (returns byte[], not a Task). The
-// 17.4 MB dxcompiler.wasm must NOT be downloaded at page init (JSHost.ImportAsync
+// ~19 MB dxcompiler.wasm must NOT be downloaded at page init (JSHost.ImportAsync
 // awaits this module's evaluation during boot, which also drives the mode-1 render).
 // So we DEFER loading: this module evaluates instantly (no top-level await), exposes
 // an async ensureReady() the host awaits ONCE before the first compile
@@ -79,7 +79,7 @@ export function ensureReady() {
         loadPromise = loadDxc().catch((e) => {
             initError = e instanceof Error ? e : new Error(String(e));
             // Reset so a LATER ensureReady() retries the download instead of the
-            // session staying bricked on a transient fetch failure of the 17 MB
+            // session staying bricked on a transient fetch failure of the ~19 MB
             // module — mirrors the shadowdusk-vkd3d shim and
             // WasmModuleRegistration.RegisterOnceAsync's reset-on-failure. initError
             // stays set between the failure and the next attempt so a stray

@@ -23,7 +23,8 @@ var result = await compiler.CompileAsync(hlslSource,
 ```
 
 > [!NOTE]
-> ShadowDusk runs only with **Vortice.Dxc 3.3.4**, the release that carries its pinned DXC. If
+> ShadowDusk runs only with **Vortice.Dxc 3.3.4**, the managed wrapper it is compiled against (the
+> DXC natives ride inside the ShadowDusk packages). If
 > another package in your application raises Vortice.Dxc (Evergine.DirectX12 pulls 3.8.3, for
 > example), your build shows warning `SD0220` next to NuGet's `NU1608`, and DirectX 12, OpenGL and
 > Vulkan compiles fail at runtime with `SD0219`; DirectX 11 and FNA are unaffected. Pin it with
@@ -63,6 +64,21 @@ var converted = ShadowDusk.ShaderToy.ShaderToyConverter.Convert(glslSource);
 ```
 
 Unsupported constructs fail loudly with a located (line/column) diagnostic rather than producing a silently-wrong `.fx`. The CLI has this front-end built in: `ShadowDuskCLI` auto-detects `.glsl`/`.frag`/`.fs` input and converts it before compiling — see the [CLI Reference](../cli/index.md).
+
+## Optional SkSL front-end
+
+`ShadowDusk.SkSL` is the same kind of package for Skia SkSL runtime-effect shaders (`half4 main(float2 coord)`): pure managed, optional, and it depends on `ShadowDusk.ShaderToy`, which installs with it. With `ShadowDusk.Compiler` beside it, `ShaderConverter.Compile` / `CompileAsync` read SkSL with no setup. SkSL text has no marker, so name the source with a `.sksl` hint:
+
+```sh
+dotnet add package ShadowDusk.SkSL
+```
+
+```csharp
+var result = ShaderConverter.Compile(new EffectCompiler(), skslSource,
+    new CompilerOptions { Target = PlatformTarget.OpenGL }, "tint.sksl");
+```
+
+Unsupported SkSL fails with a stable code (`SD0660` to `SD0673`, see [Diagnostics](../diagnostics.md)). `SkSLToFxConverter.Convert` is the standalone entry point and documents the host contract (`SpriteBatch`, `iResolution`, child textures).
 
 ## Slang input — the free subset, and the optional full language
 

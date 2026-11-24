@@ -4,7 +4,7 @@ The `ShadowDusk.Wasm` package (`WasmShaderCompiler : IShaderCompiler`) runs the 
 
 ## One faithful compiler — no substitute
 
-The in-browser HLSL → SPIR-V frontend is the **faithful pinned DirectXShaderCompiler compiled to WebAssembly**, matching the same DXC commit `Vortice.Dxc` uses on the desktop. Its SPIR-V is **byte-identical** to the desktop pipeline's. This is the load-bearing rule from THE PURPOSE: a host must never swap in a *different* HLSL→SPIR-V tool to "make the browser work," because a different compiler produces different output and breaks the "identical to `mgfxc`" promise.
+The in-browser HLSL → SPIR-V frontend is the **faithful pinned DirectXShaderCompiler compiled to WebAssembly**, matching the DXC v1.9.2607 commit the desktop runs. Its SPIR-V is **byte-identical** to the desktop pipeline's. This is the load-bearing rule from THE PURPOSE: a host must never swap in a *different* HLSL→SPIR-V tool to "make the browser work," because a different compiler produces different output and breaks the "identical to `mgfxc`" promise.
 
 > **Slang as a substitute compiler is dead — Slang as an input language is not, and the two must not be confused.** An earlier spike used Slang *in place of DXC* as the in-browser HLSL frontend; that role is permanently closed (a substitute compiler breaks the byte-identity promise above), the faithful DXC→WASM module replaced it, and any Slang artifacts left in the `ShaderFiddle.Web` sample are unregistered and never run. Separately — and without touching this rule — ShadowDusk **accepts the HLSL-compatible subset of `.slang` as an input language**: a pure managed text transform *upstream* of the pipeline (entry-point attributes → a synthesized technique), with the body compiled by the same DXC as every `.fx`. That subset route invokes no Slang toolchain, so it works on every host the pipeline works on — this one included. Genuine Slang goes through the opt-in `ShadowDusk.Slang` package's real `slangc` instead, as an input-language front end only; in the browser the same pinned slangc runs as WebAssembly (`src/ShadowDusk.Slang.Wasm`, Phase 67, in-repo and proven in CI, not a published package yet, issue #366). Neither ever replaces DXC.
 
@@ -22,7 +22,7 @@ The managed reflection + rewrite + writer stages are identical to the desktop on
 
 ## Self-contained packaging
 
-`ShadowDusk.Wasm` ships the WASM modules as **self-registered Blazor static web assets** (`_content/ShadowDusk.Wasm/`). A consumer adds a `ProjectReference`/package reference and wires **nothing** — no `JSHost.ImportAsync`. Each module is lazily downloaded on the first compile that needs it: the ~17 MB `dxcompiler.wasm` (~6 MB compressed) on the first OpenGL compile, the ~1.3 MB `vkd3d-shader.wasm` (~0.4 MB compressed) on the first DirectX/FNA compile. See the [In-Browser guide](../guides/in-browser-kni-blazor.md) and the [ShaderFiddle.Web sample](../samples/shaderfiddle-web.md).
+`ShadowDusk.Wasm` ships the WASM modules as **self-registered Blazor static web assets** (`_content/ShadowDusk.Wasm/`). A consumer adds a `ProjectReference`/package reference and wires **nothing** — no `JSHost.ImportAsync`. Each module is lazily downloaded on the first compile that needs it: the ~19 MB `dxcompiler.wasm` (~6 MB compressed) on the first OpenGL compile, the ~1.3 MB `vkd3d-shader.wasm` (~0.4 MB compressed) on the first DirectX/FNA compile. See the [In-Browser guide](../guides/in-browser-kni-blazor.md) and the [ShaderFiddle.Web sample](../samples/shaderfiddle-web.md).
 
 ## Why it's excluded from the API reference
 

@@ -26,6 +26,9 @@ name: Pack & Consume Smoke
 
 on:
   workflow_dispatch:
+  # Also callable: release.yml runs this as a gate before publishing (issue #483). In a called
+  # workflow `github.workflow` is the CALLER's name, so the concurrency group below is a literal.
+  workflow_call:
   # Label-gated on PRs (the job `if:` requires the 'run-integration' label —
   # heavyweight: packs + a cold consumer restore). NOTE: unlike ci.yml's integration
   # job there is NO push-to-main trigger here; the weekly schedule below is the
@@ -42,7 +45,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: Pack & Consume Smoke-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -80,7 +83,7 @@ jobs:
             10.0.x
 
       # Same caches as ci.yml: NuGet (carries the transitive DXC + SPIRV-Cross
-      # natives), the pinned vkd3d natives, and the pinned macOS DXC dylibs.
+      # natives), the pinned vkd3d natives, and the pinned Windows and Android DXC natives.
       - name: Cache NuGet
         uses: actions/cache@v6
         with:
@@ -192,6 +195,12 @@ jobs:
             'runtimes/linux-x64/native/libvkd3d-shader.so.1' \
             'runtimes/osx-x64/native/libvkd3d-shader.1.dylib' \
             'runtimes/osx-arm64/native/libvkd3d-shader.1.dylib' \
+            'runtimes/win-x64/native/dxcompiler.dll' \
+            'runtimes/win-x64/native/dxil.dll' \
+            'runtimes/win-arm64/native/dxcompiler.dll' \
+            'runtimes/win-arm64/native/dxil.dll' \
+            'runtimes/linux-x64/native/libdxcompiler.so' \
+            'licenses/dxc/DXC-LICENSE.txt' \
             'runtimes/osx-x64/native/libdxcompiler.dylib' \
             'runtimes/osx-arm64/native/libdxcompiler.dylib' \
             'runtimes/android-arm64/native/libdxcompiler.so' \

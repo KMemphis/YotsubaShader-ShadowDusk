@@ -16,7 +16,7 @@ ShadowDusk/
 │                                  #   vs win-x64 byte identity, issue #286). Native builds (manual dispatch;
 │                                  #   the two Android ones also on PRs touching their recipe or the restore
 │                                  #   scripts), artifacts uploaded by hand to fixed native-* release tags:
-│                                  #   dxc-build.yml (macOS DXC), dxc-android-build.yml
+│                                  #   dxc-build.yml (Windows DXC), dxc-android-build.yml
 │                                  #   (tools/build-dxc-android.sh), spirv-cross-android-build.yml
 │                                  #   (tools/build-spirv-cross-android.sh), build-vkd3d-natives.yml
 │                                  #   (desktop vkd3d), vkd3d-wasm-build.yml (browser vkd3d)
@@ -26,6 +26,8 @@ ShadowDusk/
 │   │                             #   (SpirvReflector, CtabReader), FNA fx_2_0 writer (Fx2EffectWriter)
 │   ├── ShadowDusk.HLSL/          # FX9 pre-parser, preprocessor, DXC integration, reflection,
 │   │                             #   vkd3d-shader + d3dcompiler_47 DXBC backends
+│   │                             #   licenses/dxc/: the DXC source licences, packed beside the
+│   │                             #   DXC natives into the HLSL, CLI, MGCB and WASM packages (Phase 70)
 │   ├── ShadowDusk.GLSL/          # SPIR-V → GLSL via SPIRV-Cross + MonoGameGlslRewriter (MojoShader dialect)
 │   ├── ShadowDusk.Metal/         # SPIR-V → MSL via SPIRV-Cross — STUB, not yet implemented
 │   ├── ShadowDusk.Compiler/      # EffectCompiler : IShaderCompiler + pipeline orchestration —
@@ -38,6 +40,8 @@ ShadowDusk/
 │   ├── ShadowDusk.Cli/           # CLI entry-point (dotnet tool `ShadowDuskCLI`); also accepts ShaderToy/GLSL input
 │   ├── ShadowDusk.ShaderToy/     # Pure-managed ShaderToy/GLSL → .fx front-end (ShaderToyConverter.Convert); ZERO
 │   │                             #   native + ZERO MonoGame dep; additive, upstream of the pipeline. PUBLISHED standalone NuGet (0.9.0).
+│   ├── ShadowDusk.SkSL/          # SkSL INPUT frontend (SkSLToFxConverter: SkSL -> .fx through ShadowDusk.ShaderToy
+│   │                             #   internals); PUBLISHED standalone NuGet (issue #506), registers `SkSLFrontend` for `.sksl` input in `ShaderConverter`. Opposite of Compiler's Sksl/ (.fx -> SkSL).
 │   ├── ShadowDusk.Slang/         # SlangCompiler: REAL slangc-backed Slang front-end (import/generics/interfaces,
 │   │                             #   Phase 66) — bundles real slangc (win/linux x64 + macOS x64/arm64), hands its HLSL emission to
 │   │                             #   the unchanged EffectCompiler pipeline. Opt-in, additive; the HLSL-compatible
@@ -66,6 +70,7 @@ ShadowDusk/
 │   ├── ShadowDusk.HLSL.Tests/
 │   ├── ShadowDusk.GLSL.Tests/
 │   ├── ShadowDusk.Compiler.Tests/
+│   ├── ShadowDusk.SkSL.Tests/          # SkSL-input converter unit suite (pure managed)
 │   ├── ShadowDusk.ShaderToy.Tests/     # ShaderToy→.fx converter unit/trap/golden/reject suite (pure managed)
 │   ├── ShadowDusk.Slang.Tests/         # SlangCompiler (real-slangc route) unit + [Category=Integration] suite —
 │   │                                   #   spawns the restored tools/slang/<rid>/ slangc (Phase 66; all four RIDs, issue #227)
@@ -125,9 +130,9 @@ ShadowDusk/
 ├── Directory.Build.targets        # Browser projects only: drops every copy item sourced under tools/ so no
 │                                  #   desktop/Android native reaches a net8.0-browser build or publish (issue #273)
 ├── tools/                         # Vendored / downloaded native binaries (restored, not committed)
-│   ├── dxc/<rid>/                 # OUR pinned DXC builds for osx-x64/osx-arm64 (dylib) and android-arm64
+│   ├── dxc/<rid>/                 # OUR pinned DXC v1.9.2607 builds for win-x64, win-arm64 and android-arm64
 │   │                              #   (restored + hash-pinned; android-x64 is the emulator lane's pair, never packed).
-│   │                              #   Windows/Linux DXC comes from the Vortice.Dxc 3.3.4 NuGet.
+│   │                              #   Linux and macOS DXC comes from the MonoGame.Tool.Dxc NuGet (PackageDownload).
 │   ├── spirv-cross/               # libspirv-cross-c-shared (.dll/.so/.dylib)
 │   ├── vkd3d/                     # vkd3d-shader native (cross-platform DXBC backend)
 │   ├── vkd3d-wasm/                # vkd3d-shader compiled to WASM (browser DXBC + FNA export)
@@ -176,7 +181,9 @@ ShadowDusk/
 │                                  #     RaylibRoute (Phase 59: the raylib converter in REAL Raylib-cs vs the
 │                                  #       same .fx on real MonoGame GL, two arm processes),
 │                                  #     SkiaVsKni (issue #369: the SkSL converter in REAL SkiaSharp vs the same
-│                                  #       .fx on real KNI SDL2.GL, one process), …), DX (VsDrivenDx,
+│                                  #       .fx on real KNI SDL2.GL, one process),
+│                                  #     SkSLVsGl (Phase 71: SkSL INPUT in REAL SkiaSharp vs converted on real
+│                                  #       MonoGame GL, one process), …), DX (VsDrivenDx,
 │                                  #   DxModernFeatures, ShaderToyRouteDx (that route's DirectX arm), …),
 │                                  #   KniEffectTest{KniGl,KniDx,Gl,Dx,Dx12,Vulkan} (+ SharedKniEffectTest, with Companion/ .fx): KNI's own
 │                                  #   EffectTest.cs in the real engine, GATE / KNOWN-FAIL / INFO rows + positive controls,
@@ -187,6 +194,7 @@ ShadowDusk/
 │                                  #     C# and the stock SkinnedEffect, real DesktopVK vs WindowsDX (issue #423 probe),
 │                                  #   VertexSemantics{Gl,KniGl} (+ SharedVertexSemantics): every GL vertex-input semantic
 │                                  #   and a float3x3 interpolant through a custom VertexDeclaration, vs the mgfxc build,
+│                                  #   plus the issue #524 integer-dialect rows, vs exact pixels,
 │                                  #   DX12 (BaselineDx12, CandidateDx12, VsDrivenDx12
 │                                  #     + compare_dx12.py; ManagedDxilDx12 = DXIL signed only by the managed
 │                                  #     container hash loads in real WindowsDX12, issue #478), FNA (FnaValidation), KNI (KniDesktopGL, KniWinFormsDX, KniVsDriven),

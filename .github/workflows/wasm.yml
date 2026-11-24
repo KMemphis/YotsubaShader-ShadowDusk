@@ -25,7 +25,7 @@
 #                       GPU/xvfb, headless Chromium byte-identity vs the manifest.
 #
 # ── NATIVE WASM ARTIFACTS ─────────────────────────────────────────────────────
-#   * The faithful DXC->WASM module (dxcompiler.{js,wasm}, ~17.4 MB) is an out-of-band
+#   * The faithful DXC->WASM module (dxcompiler.{js,wasm}, ~19 MB) is an out-of-band
 #     emscripten build that CI cannot reconstruct from source (it needs the multi-GB
 #     DXC/LLVM build), so the built artifact is FORCE-COMMITTED at
 #     .wasm-build/dxc-wasm-out/ and tools/restore.sh copies it into the package
@@ -129,6 +129,13 @@ jobs:
           # (which fails hard on the same file) only discovered it at release time.
           if [ ! -f src/ShadowDusk.Wasm/wwwroot/dxc/dxcompiler.wasm ]; then
             echo "::error::dxcompiler.wasm is missing from src/ShadowDusk.Wasm/wwwroot/dxc/ after tools/restore.sh. It is copied from the force-committed .wasm-build/dxc-wasm-out/dxcompiler.wasm, so either that blob or restore.sh's Restore-DxcWasm step has regressed."
+            exit 1
+          fi
+          # The emscripten loader is generated with the .wasm and calls it through a minified import
+          # table, so a rebuilt module with the previous loader traps at startup (Phase 70). restore
+          # copies only the .wasm; the loader is committed in both places and must stay equal.
+          if ! cmp -s .wasm-build/dxc-wasm-out/dxcompiler.js src/ShadowDusk.Wasm/wwwroot/dxc/dxcompiler.js; then
+            echo "::error::src/ShadowDusk.Wasm/wwwroot/dxc/dxcompiler.js is not the loader built with .wasm-build/dxc-wasm-out/dxcompiler.wasm. Copy it."
             exit 1
           fi
           echo "present=true" >> "$GITHUB_OUTPUT"
