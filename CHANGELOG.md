@@ -7,12 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ShadowDusk is a cross-platform, in-memory drop-in `mgfxc` replacement: a self-contained
 library that compiles `.fx` → `.mgfx` at runtime on Linux, macOS, and Windows, with output
-that loads and renders identically to `mgfxc`'s in the real MonoGame/KNI runtime. All ten
+that loads and renders identically to `mgfxc`'s in the real MonoGame/KNI runtime. All eleven
 `ShadowDusk.*` packages share a single version (see `Directory.Build.props` `<Version>`).
 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## [0.27.0] - 2026-11-23
+
+### Added
+
+- FNA: new warning `SD0306` when a column-major matrix has a non-symmetric initializer default, which FNA reads as its transpose. It tells the developer to call `SetValue(Matrix)`. The compiled `.fxb` does not change and stays equal to `fxc`'s.
+- Docs: a guide section on using HLSL annotations as shader UI metadata, with a suggested `UIName` / `UIGroup` / `UIMin` / `UIMax` / `UIStep` / `UIWidget` convention and what each target reports (issue #414).
+
+### Changed
+
+- **The DXC pin moved from v1.7.2212 to v1.9.2607, the DXC MonoGame 3.8.6 bundles** ([Phase 70](plan/DONE/PHASE-70-dxc-pin-bump.md), [issue #287](https://github.com/kaltinril/ShadowDusk/issues/287)). **Compiled output changes on DirectX 12, Vulkan and OpenGL; DirectX 11 and FNA output does not.** Of the byte-identity manifests, 181 of 198 DirectX 12 entries, 42 of 198 Vulkan release entries (172 debug), 4 of 51 OpenGL entries and 8 of 21 Slang OpenGL entries moved. Against real `mgfxc` 3.8.6.1, 183 of 187 DirectX 12 shaders are now instruction-identical (158 before) and 162 of 168 Vulkan shaders have identical function bodies (131 before).
+- **DirectX 12 and Vulkan now compile as HLSL 2021, as `mgfxc` does**, so `&&`, `||` and `?:` short-circuit there. A shader whose `?:` arm has a side effect (`x < y ? acc = w : acc`) now runs that assignment only when the condition holds, which can change its rendering on these two targets to match `mgfxc`. OpenGL and DirectX 11 keep the behavior of their `fxc` reference. A source 2021 refuses (a vector condition in `?:`, `&&` or `||`) is compiled again as HLSL 2018, so it keeps compiling, with the new warning `SD0242` because `mgfxc` would not compile it for these targets. One narrow exception, on Vulkan: a source whose preprocessed code depends on `__HLSL_VERSION` and that fails at 2021 now reports that error.
+- **`ShadowDusk.HLSL` now carries the DXC natives** for every supported RID, so the package is larger (about 83 MB). `Vortice.Dxc` 3.3.4 remains as the managed wrapper only. No binary from Microsoft's DXC release is redistributed: Windows and Android DXC are built by this project from the v1.9.2607 tag, Linux and macOS come from `MonoGame.Tool.Dxc`, and the licenses of that source ship under `licenses/dxc/`.
+
+### Fixed
+
+- Linux: a process that loaded ShadowDusk's DXC could abort at normal exit, after all its work was done, with `free(): corrupted unsorted chunks` ([issue #528](https://github.com/kaltinril/ShadowDusk/issues/528)). The cause was a use-after-free in DXC v1.7.2212's shutdown (DXC issue #5119), fixed upstream before v1.9.2607, so the pin move above removes it: the KNI GL driver that aborted in about 1.5% of runs on the old pin aborted in none of 2,671 on the new one. Compiled output was never affected.
+- A DXC native built for another architecture is refused before it is loaded. An ARM64EC `dxcompiler.dll` carries an x64 header, so an x64 process used to map it and crash on the first call.
+- OpenGL: a stage using `SV_VertexID`, `SV_InstanceID`, `uint`/`uint2..4`, or an integer shift, bitwise or modulo operator now compiles on Apple's OpenGL 2.1, Mesa and MonoGame 3.8.6 DesktopGL4, which all refused the versionless GLSL ([issue #524](https://github.com/kaltinril/ShadowDusk/issues/524)). GL rewrite Rule 19 adds a guarded `GL_EXT_gpu_shader4` prelude to those stages only; every other stage is byte-identical. **Still open on macOS:** a vertex shader driven only by `SV_VertexID` or `SV_InstanceID`, with no vertex input (the fullscreen-triangle shape), now compiles but draws nothing on Apple's GL, because no attribute array is enabled. The new warning `SD0404` reports it; reading a `POSITION0` input that reaches the output draws correctly. `SD0403` still warns for these constructs, now naming the stacks that remain: GLSL ES 1.00 (WebGL1, KNI Reach) and desktop drivers without the extension.
+- Test suite only, no shipped code changed ([issue #503](https://github.com/kaltinril/ShadowDusk/issues/503)): the positive control that proves vkd3d still hangs on `#define K K` now stops itself once its memory has grown 256 MiB, instead of letting vkd3d allocate without bound for 20 s. Every machine-wide stall measured on the Windows CI runner (7 of 24 runs, up to 110 s with no test finishing in any host) began while this control ran, and all 4 runs with a 60 s slangc timeout were among them.
+
+## [0.26.0] - 2026-11-15
+
+### Added
+
+- `ShadowDusk.SkSL` is now a NuGet package ([issue #506](https://github.com/kaltinril/ShadowDusk/issues/506)), the eleventh, at the shared version; it depends on `ShadowDusk.ShaderToy` and `ShadowDusk.Core` and carries no natives. It registers `SkSLFrontend`, so `ShaderConverter.Compile` / `CompileAsync` read SkSL given a `.sksl` name hint (SkSL has no content marker, so `ShaderFormatDetector` reports the new `ShaderFormat.Sksl` only from that extension). The converter's `SD0660` to `SD0673` codes arrive unchanged in `ShaderError.Code`, and the effect and technique keep the converter's names. A trimmed application calls `SkSLFrontend.Register()`.
+
+- `SkSLToFxConverter` diagnostics carry stable codes (issue #508): `ConvertDiagnostic` has a new `Code` property, and the SkSL frontend uses `SD0660` to `SD0673` (unsupported construct `SD0666`, reserved identifier `SD0667`, entry-point shapes `SD0661` to `SD0665`, and so on), listed in `docs/error-codes.md`. The ShaderToy stage's own diagnostics reach an SkSL caller as `SD0672` (error) or `SD0673` (warning).
+
+- `ShadowDusk.SkSL` ([Phase 71](plan/PHASE-71-sksl-input-frontend.md)): `SkSLToFxConverter` converts SkSL runtime-effect shaders (`half4 main(float2)`) to `.fx`, including `uniform shader` children (`img.eval(p)` samples at `p * imgTexelSize`, a host-set 1/size). Each `.fx` has two techniques: `SkSL` (default) for premultiplied textures with `BlendState.AlphaBlend`, and `SkSLStraightAlpha` for straight-alpha textures with `BlendState.NonPremultiplied` (Gum's default). Unsupported SkSL (`sk_FragCoord`, which SkiaSharp 3 and later reject too, `layout(color)`, color filters, blenders, color-space built-ins, non-square matrices) fails with an SkSL diagnostic. The `.fx` is pixel-shader only and drawn with `SpriteBatch`, with `iResolution` set to the sprite's size, so `main`'s coordinate is local to the sprite wherever it is drawn (what Skia passes when the canvas is translated and the shape drawn at the origin, the way Gum draws a container), and the color passed to `SpriteBatch.Draw` multiplies the result as a Skia paint's alpha does. A `uniform shader` child that is never evaluated is refused, since it would shift the later children's texture slots. `validation/SkSLVsGl` renders the same SkSL in real SkiaSharp and, converted, in real MonoGame DesktopGL at 64x48: 8/8 premultiplied cases (one an offset 40x30 sprite, one faded through the sprite color) and 3/3 straight-alpha arms within 2/255, eight positive controls caught; in the ubuntu GL CI job.
+
+- `ShaderConverter.Compile` / `CompileAsync` read ShaderToy and plain GLSL when the `ShadowDusk.ShaderToy` package is installed: hand them any source and they convert and compile it, with no call to `ShaderToyConverter` and no registration code. The package registers a frontend (`ShaderToyFrontend`) with the new `ShaderFrontends` registry in `ShadowDusk.Core` (`IShaderFrontend`); a trimmed application calls `ShaderToyFrontend.Register()` once. The result is byte-identical to converting and compiling in two steps with the same names (a name hint names the effect and technique after the file, as the CLI does; no hint keeps the converter's defaults), conversion errors are the converter's own (`SD0006`, located in the GLSL), and without the package GLSL is still `UnsupportedInput` (`SD0650`). `ShaderConverter.CanCompile` is the cheap check for these two methods; `CanConvert` is unchanged. `ConvertToSksl` and `ConvertToRaylib` still read only `.fx` and Slang ([#473](https://github.com/kaltinril/ShadowDusk/issues/473)).
+
+- `RuntimeProfileDetector.RecommendKnifx(Assembly)` (and a `Version` overload): a KNI game that compiles to KNIFX at runtime passes `typeof(Game).Assembly` and gets the KNIFX version its own KNI loads, v12 on KNI 4.3 and later, v11 on older ones, instead of choosing between `KniGL_4_02` and `KniGL_4_03` itself. Checked on real KNI 4.2.9001 and 4.3.9001 ([#456](https://github.com/kaltinril/ShadowDusk/issues/456)).
 
 - `validation/ManagedDxilDx12`: DXIL signed only by the managed container hash loads in real MonoGame `WindowsDX12` and renders pixel-identical to the `dxil.dll`-signed build and the `mgfxc` golden (PS corpus and VS rig), with a wrong-hash negative control; in the DX-on-WARP CI job and the Windows render gate script ([#478](https://github.com/kaltinril/ShadowDusk/issues/478)).
 
@@ -20,7 +58,25 @@ that loads and renders identically to `mgfxc`'s in the real MonoGame/KNI runtime
 
 ### Changed
 
+- `ShadowDusk.ShaderToy` now depends on `ShadowDusk.Core` (pure managed, no dependencies of its own), its first package dependency, so it can register its frontend. `ShadowDusk.Compiler` still does not depend on `ShadowDusk.ShaderToy`.
+
+- ShaderToy and SkSL conversion: the generated `.fx` keeps only the parentheses that precedence, associativity or readability need (`tex2D(img, (c + float2(1, 0)) * imgTexelSize)` instead of `tex2D(img, ((c + float2(1, 0)) * imgTexelSize))`, `(float3)a` instead of `((float3)(a))`). The compiled output is unchanged: every re-pinned converter golden builds to the same `.mgfx` bytes on OpenGL and DirectX 11, and `mgfxc` rebuilt the `GradientToy` goldens byte-identical.
+
 ### Fixed
+
+- `release.yml`'s "CI is green on the release commit" check now resolves the newest CI-triggering commit with `git log --first-parent`, so a PR merged with a merge commit is checked on the merge commit (where the push-event run lives) instead of the PR branch tip, which only has `pull_request` runs and made the check fail on every such release.
+
+- CLI: the single-file linux-x64 build published with .NET SDK 11 again bundles `libvkd3d-shader.so.1`; without it, DirectX 11 compiles failed with `SD0211`.
+
+- SkSL input: `uniform int` / `uniform bool` (and their vectors) no longer fail SD0210 on the OpenGL target (issue #507). `SkSLToFxConverter` lowers them to float uniforms on every target and reads them as `int(name)` / `bool(name)` in the shader, so integer division and indexing keep their meaning; the host sets a float (0/1 for a bool). Arrays, multi-declarator statements and names reused by a local are refused with `SD0671`.
+
+- `RuntimeProfileDetector.Classify` recognises real KNI. KNI's assemblies are named `Xna.Framework*`; the detector looked for the package id `nkast.Xna.Framework*` and reported every real KNI as `Unknown`. `Recommend` returned the same MGFX v10 profile either way, so no output changed.
+
+- `ShadowDusk.Slang`: an `SD0645` timeout now says what slangc was doing when it was killed (CPU time used, whether it had read the whole source, how much output had arrived), so a stuck slangc can be told from a slow one.
+
+- `ShadowDusk.Slang`: a slangc run no longer depends on free thread-pool threads. On a busy pool (many compiles at once, a loaded machine) slangc's output was not read, so the compile stalled until `SlangcTimeout` and failed `SD0645`, and the timeout itself could fire minutes late (measured: 216 s for a 2 s limit). The pipes now have dedicated threads and the timeout is a plain timed wait.
+
+- ShaderToy and SkSL conversion: a doubled prefix sign (`-(-x)`, `- -x`) no longer emits `--x`, a decrement in HLSL; it now emits `-(-x)`.
 
 - OpenGL: an HLSL array initializer (`float m[16] = { ... }`, a lookup table) no longer emits a GLSL ES 3.00 array constructor (`float[](...)`) that WebGL1 and KNI Reach refuse at load. Rewrite Rule 18 declares the array plain and assigns each element, and `SD0403` now warns for any array constructor that survives (issue #475)
 
@@ -4265,7 +4321,9 @@ WASM-capable build — the same pipeline on every host, with no substitute compi
 - **The MGCB content-processor plugin** is a scaffold; the PATH-based `mgfxc` override is the
   shipping MGCB integration path.
 
-[Unreleased]: https://github.com/kaltinril/ShadowDusk/compare/v0.25.1...HEAD
+[Unreleased]: https://github.com/kaltinril/ShadowDusk/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/kaltinril/ShadowDusk/compare/v0.26.0...v0.27.0
+[0.26.0]: https://github.com/kaltinril/ShadowDusk/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/kaltinril/ShadowDusk/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/kaltinril/ShadowDusk/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/kaltinril/ShadowDusk/compare/v0.23.0...v0.24.0

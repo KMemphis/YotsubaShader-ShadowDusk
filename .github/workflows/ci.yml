@@ -3,8 +3,8 @@
 # push/PR. This is Phase 30 §6, reconciled with the AS-BUILT native strategy:
 #
 #   * SPIRV-Cross (OpenGL path) ships TRANSITIVELY via the Silk.NET.SPIRV.Cross.Native
-#     NuGet, and DXC via Vortice.Dxc — both are restored by `dotnet restore` and live
-#     in the NuGet package cache. There is NO `tools/spirv-cross/` bundling step (the
+#     NuGet. DXC rides in ShadowDusk.HLSL: Linux and macOS from MonoGame.Tool.Dxc (dotnet
+#     restore), Windows and Android from tools/restore. There is NO `tools/spirv-cross/` bundling step (the
 #     doc's §3/§4 manual-bundle + native-versions.json model is OBSOLETE here).
 #   * The DirectX DXBC backend's `vkd3d-shader` native is a RESTORED, non-redistributed
 #     artifact. `tools/restore.*` verifies/recipes it and NO-OPs gracefully when absent
@@ -147,7 +147,7 @@ jobs:
           path: tools/vkd3d
           key: vkd3d-2.1-${{ runner.os }}
 
-      # Same pattern for the pinned macOS DXC dylibs (Phase 37 A).
+      # Same pattern for the DXC natives restored into tools/dxc (Windows and Android, Phase 70).
       - name: Cache DXC macOS natives
         uses: actions/cache@v6
         with:
@@ -166,7 +166,7 @@ jobs:
           key: spirv-cross-android-${{ runner.os }}-${{ hashFiles('tools/restore.sh', 'tools/restore.ps1') }}
 
       # Restore the vkd3d-shader natives (DirectX DXBC backend + the FNA target's
-      # engine) and the macOS DXC dylibs (OpenGL frontend on macOS, Phase 37 A).
+      # engine) and the Windows and Android DXC natives (Phase 70).
       # A failed pinned DOWNLOAD only warns (the script is offline-tolerant by design;
       # vkd3d-dependent tests skip / fail SD0211 loudly) — but the script's own exit
       # code is honored: do NOT wrap it in `|| true` (that once swallowed every restore
@@ -199,8 +199,10 @@ jobs:
             'tools/vkd3d/libvkd3d-shader.so.1' \
             'tools/vkd3d/osx-x64/libvkd3d-shader.1.dylib' \
             'tools/vkd3d/osx-arm64/libvkd3d-shader.1.dylib' \
-            'tools/dxc/osx-x64/libdxcompiler.dylib' \
-            'tools/dxc/osx-arm64/libdxcompiler.dylib' \
+            'tools/dxc/win-x64/dxcompiler.dll' \
+            'tools/dxc/win-x64/dxil.dll' \
+            'tools/dxc/win-arm64/dxcompiler.dll' \
+            'tools/dxc/win-arm64/dxil.dll' \
             'tools/dxc/android-arm64/libdxcompiler.so' \
             'tools/dxc/android-x64/libdxcompiler.so' \
             'tools/spirv-cross/android-arm64/libspirv-cross.so' \
@@ -283,12 +285,15 @@ jobs:
       # (measured: 14 files, zero overwrite warnings). See the integration steps below for
       # why this is more than tidiness.
       - name: dotnet test (unit, Windows — full; GL renders only on GPU-equipped hosts)
+        timeout-minutes: 8
         if: runner.os == 'Windows'
         run: >
           dotnet test ShadowDusk.slnx --no-build -c Release
           --filter "(Category!=Integration|Category=Fidelity)"
           --logger "trx;LogFilePrefix=unit-${{ matrix.os }}"
+          --blame-hang-timeout 2m --blame-hang-dump-type full
           --results-directory TestResults/
+          -- RunConfiguration.TestSessionTimeout=360000
 
       # Diagnostic for the GLFW native (the previous, pre-xvfb soft-skip reason on this
       # runner family was "GlfwPlatform - not applicable" = Glfw.GetApi() could not LOAD
@@ -320,6 +325,7 @@ jobs:
       # fixture; if the Linux DXC divergence bites it, that failure is F11 evidence
       # and must be handled there, not re-masked here.)
       - name: dotnet test (unit, Linux — REAL GL render under xvfb/llvmpipe, REQUIRE_GL hard gate)
+        timeout-minutes: 8
         if: runner.os == 'Linux'
         env:
           # Pin Mesa's software rasterizer even if a GPU device node exists (same as wasm.yml).
@@ -330,15 +336,20 @@ jobs:
           xvfb-run -a dotnet test ShadowDusk.slnx --no-build -c Release
           --filter "(Category!=Integration|Category=Fidelity)&FullyQualifiedName!~Phase34TextureBreadthTests"
           --logger "trx;LogFilePrefix=unit-${{ matrix.os }}"
+          --blame-hang-timeout 2m --blame-hang-dump-type full
           --results-directory TestResults/
+          -- RunConfiguration.TestSessionTimeout=360000
 
       - name: dotnet test (unit, macOS — advanced-texture compile tests excluded; GL proxy N/A)
+        timeout-minutes: 8
         if: runner.os == 'macOS'
         run: >
           dotnet test ShadowDusk.slnx --no-build -c Release
           --filter "(Category!=Integration|Category=Fidelity)&FullyQualifiedName!~Phase34TextureBreadthTests"
           --logger "trx;LogFilePrefix=unit-${{ matrix.os }}"
+          --blame-hang-timeout 2m --blame-hang-dump-type full
           --results-directory TestResults/
+          -- RunConfiguration.TestSessionTimeout=360000
 
       - name: Upload test results
         if: always()
@@ -346,6 +357,19 @@ jobs:
         with:
           name: test-results-${{ matrix.os }}
           path: TestResults/unit-*.trx
+          retention-days: 7
+
+      # A unit test host killed by --blame-hang-timeout leaves its dump and the sequence file
+      # naming the stuck test here (issue #504).
+      - name: Upload unit hang dumps
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-hang-dumps-${{ matrix.os }}
+          path: |
+            TestResults/**/*.dmp
+            TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
           retention-days: 7
 
       # The suite-level TestSessionTimeout guardrail (Phase 21) backstops the per-test

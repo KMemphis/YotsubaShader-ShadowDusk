@@ -8,12 +8,17 @@
 #
 # Pipeline:
 #   validate          → resolve + guard the version
+#   verify-ci         → fail unless ci.yml and validation-render.yml are green on the release
+#                       commit (issue #483); everything below needs it
+#   pack-consume / win-arm64 / android-emulator
+#                     → the three pre-release workflows, called (workflow_call) so one dispatch
+#                       runs them; nuget-push needs all three
 #   build-and-test    → 3-OS build + full test gate
-#   pack-desktop      → pack the EIGHT desktop packages (Core/HLSL/GLSL/ShaderToy/Slang/Compiler/
+#   pack-desktop      → pack the NINE desktop packages (Core/HLSL/GLSL/ShaderToy/SkSL/Slang/Compiler/
 #                       Cli/ContentPipeline) at the validated version, with symbols (.snupkg), PLUS the
 #                       ShadowDusk.MgcbPlugin tools-only package (Phase 29) in a separate
 #                       step without symbols — it has no lib/, so a .snupkg cannot be built
-#   pack-wasm         → pack ShadowDusk.Wasm (the TENTH package) in THIS workflow —
+#   pack-wasm         → pack ShadowDusk.Wasm (the ELEVENTH package) in THIS workflow —
 #                       its own job because it needs the wasm-tools workload and the
 #                       restored dxcompiler.wasm (its `VerifyDxcWasmPresent` MSBuild
 #                       target hard-fails the pack otherwise)
@@ -84,11 +89,83 @@ jobs:
             exit 1
           fi
 
+  # ── Fail unless CI and the render-gate workflow are green on the release commit ──
+  # 0.25.1 was published while validation-render.yml was red on its commit (issue #483).
+  # A workflow with path filters has no run on a commit that did not touch those paths (the
+  # version-bump merge touches only Directory.Build.props, lock files, CHANGELOG and
+  # RELEASING.md), so the check is made at the newest commit at or before this one that
+  # DID touch them: nothing that triggers the workflow changed in between.
+  # The Windows GPU render gate (validation/run-windows-render-gates.ps1) is not checked here;
+  # it is a local step before the version bump (RELEASING.md, Prerequisites item 5).
+  verify-ci:
+    name: Verify CI is green on the release commit
+    runs-on: ubuntu-latest
+    needs: validate
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require a successful ci.yml and validation-render.yml run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -u
+          fail=0
+          check() {
+            local workflow="$1"; shift
+            # The remaining arguments are the pathspec that triggers the workflow on a push.
+            local sha
+            # --first-parent: a PR merged with a merge commit must resolve to the merge commit (the push-event
+            # run lives there); without it git skips the merge and lands on the PR branch tip, which only has pull_request runs.
+            sha=$(git log -1 --first-parent --format=%H "$RELEASE_SHA" -- "$@")
+            if [ -z "$sha" ]; then
+              echo "::error::$workflow: no commit at or before $RELEASE_SHA touches its trigger paths"; fail=1; return
+            fi
+            local ok
+            ok=$(gh api "repos/$REPO/actions/workflows/$workflow/runs?head_sha=$sha&per_page=100" \
+              --jq '[.workflow_runs[] | select(.conclusion == "success" and .event != "pull_request")] | length')
+            if [ "${ok:-0}" -gt 0 ]; then
+              echo "OK    $workflow: green on $sha (release commit $RELEASE_SHA)"
+            else
+              echo "::error::$workflow has no successful run on $sha (the newest commit at or before the release commit $RELEASE_SHA that triggers it). Wait for it, fix it, or run it on that commit, then dispatch the release again."
+              fail=1
+            fi
+          }
+          # Trigger paths: ci.yml's paths-ignore inverted; validation-render.yml's paths.
+          check ci.yml . ':(exclude,glob)**/*.md' ':(exclude)plan' ':(exclude)docs' ':(exclude)docfx' ':(exclude)LICENSE' ':(exclude).gitignore'
+          check validation-render.yml src validation tests/fixtures tools/restore.sh tools/restore.ps1 .github/workflows/validation-render.yml
+          exit $fail
+
+  # ── The three workflows that used to be dispatched by hand before a release ──
+  # Called with the release ref, so they check out and test the release commit. Each has a
+  # `workflow_call` trigger; their own `if:` conditions pass because github.event_name is the
+  # caller's (workflow_dispatch).
+  pack-consume:
+    name: Pack & Consume Smoke
+    needs: [ validate, verify-ci ]
+    uses: ./.github/workflows/pack-consume.yml
+
+  win-arm64:
+    name: win-arm64
+    needs: [ validate, verify-ci ]
+    uses: ./.github/workflows/win-arm64.yml
+
+  android-emulator:
+    name: Android emulator
+    needs: [ validate, verify-ci ]
+    uses: ./.github/workflows/android-emulator.yml
+
   # ── Build + test on all 3 OS before releasing ──────────────────────────────
   build-and-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: validate
+    needs: [ validate, verify-ci ]
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -144,12 +221,15 @@ jobs:
       # ("DXC's native fails to load on macOS") that Phase 37 A/B fixed — a red unit
       # suite on any OS is a real defect and must block the release.
       - name: dotnet test (unit)
+        timeout-minutes: 8
         run: >
           dotnet test ShadowDusk.slnx --no-build -c Release
           --filter "Category!=Integration"
           --settings ShadowDusk.runsettings
           --logger "trx;LogFilePrefix=release-test-${{ matrix.os }}"
+          --blame-hang-timeout 2m --blame-hang-dump-type full
           --results-directory TestResults/
+          -- RunConfiguration.TestSessionTimeout=360000
 
       - name: Upload test results
         if: always()
@@ -159,7 +239,7 @@ jobs:
           path: TestResults/*.trx
           retention-days: 30
 
-  # ── Pack the eight desktop packages + the MGCB plugin (Wasm: pack-wasm below) ──
+  # ── Pack the nine desktop packages + the MGCB plugin (Wasm: pack-wasm below) ──
   pack-desktop:
     name: Pack desktop NuGet packages
     runs-on: ubuntu-latest
@@ -232,8 +312,10 @@ jobs:
             'tools/vkd3d/libvkd3d-shader.so.1' \
             'tools/vkd3d/osx-x64/libvkd3d-shader.1.dylib' \
             'tools/vkd3d/osx-arm64/libvkd3d-shader.1.dylib' \
-            'tools/dxc/osx-x64/libdxcompiler.dylib' \
-            'tools/dxc/osx-arm64/libdxcompiler.dylib' \
+            'tools/dxc/win-x64/dxcompiler.dll' \
+            'tools/dxc/win-x64/dxil.dll' \
+            'tools/dxc/win-arm64/dxcompiler.dll' \
+            'tools/dxc/win-arm64/dxil.dll' \
             'tools/dxc/android-arm64/libdxcompiler.so' \
             'tools/spirv-cross/android-arm64/libspirv-cross.so' \
             'tools/slang/win-x64/slangc.exe' \
@@ -254,13 +336,15 @@ jobs:
       - name: dotnet restore
         run: dotnet restore ShadowDusk.slnx --locked-mode
 
-      # Pack the eight desktop packages at the validated version, with symbol
+      # Pack the nine desktop packages at the validated version, with symbol
       # packages (.snupkg). The Version override is belt-and-braces — it already
       # equals Directory.Build.props per the validate guard — but keeps the pack
       # explicit and matches a workflow_dispatch where the tag may not exist yet.
       # ShadowDusk.ShaderToy is the standalone, pure-managed ShaderToy/GLSL -> .fx
-      # front-end (zero natives, no ProjectReferences): it is NOT in the
-      # ShadowDusk.Compiler dependency graph, so pack-consume.yml does not pull it.
+      # front-end (zero natives; its one dependency is ShadowDusk.Core, issue #473): it is NOT
+      # in the ShadowDusk.Compiler dependency graph, so pack-consume.yml does not pull it.
+      # ShadowDusk.SkSL is the matching pure-managed SkSL -> .fx front-end (issue #506): it depends
+      # on ShadowDusk.ShaderToy and ShadowDusk.Core, carries no natives, and is not in the Compiler graph either.
       # ShadowDusk.Slang is the opt-in real-slangc Slang front-end (Phase 66): it depends on
       # ShadowDusk.Compiler and carries slangc for four RIDs, gated below.
       - name: Pack desktop packages
@@ -270,6 +354,7 @@ jobs:
             src/ShadowDusk.HLSL/ShadowDusk.HLSL.csproj \
             src/ShadowDusk.GLSL/ShadowDusk.GLSL.csproj \
             src/ShadowDusk.ShaderToy/ShadowDusk.ShaderToy.csproj \
+            src/ShadowDusk.SkSL/ShadowDusk.SkSL.csproj \
             src/ShadowDusk.Slang/ShadowDusk.Slang.csproj \
             src/ShadowDusk.Compiler/ShadowDusk.Compiler.csproj \
             src/ShadowDusk.Cli/ShadowDusk.Cli.csproj \
@@ -295,22 +380,22 @@ jobs:
           ls -la nupkg/
           count=$(find nupkg -maxdepth 1 -name '*.nupkg' | wc -l)
           echo "Found $count .nupkg files"
-          if [ "$count" -lt 9 ]; then
-            echo "::error::Expected 9 desktop .nupkg (8 libraries/CLI/ContentPipeline + ShadowDusk.MgcbPlugin), found $count"
+          if [ "$count" -lt 10 ]; then
+            echo "::error::Expected 10 desktop .nupkg (9 libraries/CLI/ContentPipeline + ShadowDusk.MgcbPlugin), found $count"
             exit 1
           fi
 
       # ShadowDusk.HLSL's native packing is restore-state-dependent (csproj entries are
       # Condition="Exists(...)"): a pack on a machine without the restored binaries
       # SILENTLY produces a package whose FNA target and DxbcBackend.Vkd3d fail with
-      # SD0211 — and, for the Phase 37 A macOS DXC dylibs, whose ENTIRE OpenGL pipeline
+      # SD0211 — and, for the DXC natives, whose ENTIRE OpenGL pipeline
       # dies with DllNotFoundException on every Mac — for every NuGet consumer,
       # directly contradicting the documented self-contained promise. Fail the release
       # red instead (the mirror of the pack-wasm dxcompiler.wasm gate; same list as
       # pack-consume.yml's pack gate). tools/restore.sh provisions everything by pinned
       # download (Phase 37 A/C), so a clean CI runner satisfies this gate.
       # The LGPL-2.1 notice must ride along with the binaries it covers.
-      - name: Verify ShadowDusk.HLSL contains all natives (vkd3d ×4 RIDs + macOS DXC ×2 + android-arm64 DXC) + LGPL notice
+      - name: Verify ShadowDusk.HLSL contains all natives (vkd3d ×4 RIDs + DXC for win-x64, win-arm64, linux-x64, osx ×2, android-arm64) + notices
         run: |
           pkg=$(find nupkg -maxdepth 1 -name 'ShadowDusk.HLSL.*.nupkg' ! -name '*.snupkg' | head -1)
           echo "Inspecting $pkg"
@@ -324,6 +409,12 @@ jobs:
             'runtimes/linux-x64/native/libvkd3d-shader.so.1' \
             'runtimes/osx-x64/native/libvkd3d-shader.1.dylib' \
             'runtimes/osx-arm64/native/libvkd3d-shader.1.dylib' \
+            'runtimes/win-x64/native/dxcompiler.dll' \
+            'runtimes/win-x64/native/dxil.dll' \
+            'runtimes/win-arm64/native/dxcompiler.dll' \
+            'runtimes/win-arm64/native/dxil.dll' \
+            'runtimes/linux-x64/native/libdxcompiler.so' \
+            'licenses/dxc/DXC-LICENSE.txt' \
             'runtimes/osx-x64/native/libdxcompiler.dylib' \
             'runtimes/osx-arm64/native/libdxcompiler.dylib' \
             'runtimes/android-arm64/native/libdxcompiler.so' \
@@ -378,6 +469,7 @@ jobs:
           for entry in \
             'tools/net8.0/any/ShadowDusk.MgcbPlugin.dll' \
             'tools/net8.0/any/ShadowDusk.Compiler.dll' \
+            'tools/net8.0/any/licenses/dxc/DXC-LICENSE.txt' \
             'tools/net8.0/any/Vortice.Dxc.dll' \
             'tools/net8.0/any/runtimes/win-x64/native/dxcompiler.dll' \
             'tools/net8.0/any/runtimes/win-x64/native/spirv-cross.dll' \
@@ -717,7 +809,7 @@ jobs:
   nuget-push:
     name: NuGet Push
     runs-on: ubuntu-latest
-    needs: [ validate, pack-desktop, pack-wasm ]
+    needs: [ validate, verify-ci, pack-desktop, pack-wasm, pack-consume, win-arm64, android-emulator ]
     # Trusted Publishing: GitHub's OIDC token is exchanged for a one-hour nuget.org key, so
     # there is no long-lived key to expire or leak. The policy on nuget.org trusts this repo's
     # `release.yml` (RELEASING.md, Prerequisites).
@@ -738,8 +830,8 @@ jobs:
           name: nupkg-desktop
           path: nupkg/
 
-      # ShadowDusk.Wasm (one of the ten packages) is packed by the pack-wasm job in THIS run,
-      # so its artifact is available here. All ten packages publish together.
+      # ShadowDusk.Wasm (one of the eleven packages) is packed by the pack-wasm job in THIS run,
+      # so its artifact is available here. All eleven packages publish together.
       - name: Download Wasm package
         uses: actions/download-artifact@v8
         with:

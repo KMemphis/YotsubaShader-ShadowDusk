@@ -278,7 +278,10 @@ internal sealed class CompilationPipeline
         // macro set can define __KNIFX__ for a KNIFX-targeted compile (KNI's compiler always
         // does — see PlatformMacros.For(target, container)). Same value reused at Seam 5 below.
         EffectContainer effectiveContainer = options.Profile?.Container ?? options.Container;
-        MacroSet macros = PlatformMacros.For(options.Target, effectiveContainer);
+        MacroSet macros = PlatformMacros.For(options.Target, effectiveContainer) with
+        {
+            DxcLanguageVersion = ShadowDusk.HLSL.Dxc.DxcLanguageVersion.For(options.Target),
+        };
         if (options.Defines.Count > 0)
         {
             // mgfxc /Defines: parity (bug-hunt 2026-07-27 M9). User macros ride with the
@@ -408,6 +411,7 @@ internal sealed class CompilationPipeline
                 Macros         = macros.Macros
                     .Select(m => (m.Name, (string?)m.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))
                     .ToList(),
+                LanguageVersion = macros.DxcLanguageVersion,
             };
 
             Result<string, ShaderError> expandResult =
@@ -2407,6 +2411,7 @@ internal sealed class CompilationPipeline
             Macros         = macros.Macros
                 .Select(m => (m.Name, (string?)m.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))
                 .ToList(),
+            LanguageVersion = macros.DxcLanguageVersion,
         };
 
         Result<string, ShaderError> result = dxcCompiler.Value.Preprocess(request, cancellationToken);
@@ -2704,6 +2709,10 @@ internal sealed class CompilationPipeline
         var writeResult = new Fx2EffectWriter().Write(buildResult.Value);
         if (writeResult.IsFailure)
             return Fail(writeResult.Error, fnaWarnings);
+
+        // Tells the developer only: the default stays byte-equal to fxc's (issue #505).
+        if (FnaMatrixDefaultWarning.Check(ctabs, sourceFileName) is { } matrixDefaultWarning)
+            AccumulateWarnings(fnaWarnings, fnaSeenWarnings, [matrixDefaultWarning]);
 
         return Result<CompiledShader, ShaderError[]>.Ok(
             new CompiledShader(PlatformTarget.Fna, writeResult.Value)
@@ -4220,7 +4229,7 @@ internal sealed class CompilationPipeline
             //
             // The warning is matched to a kept default by POSITION, inside the span from the declared
             // name to the end of its initializer: the SPIR-V path reports the initializer's first
-            // token, the DXIL path the name (measured, DXC 1.7.2212.40), so a brace or '=' on the next
+            // token, the DXIL path the name (measured on DXC 1.7.2212.40), so a brace or '=' on the next
             // line (`float4 C =` / `{ 1, 0, 0, 1 };`) used to leave a stale warning behind when only
             // the name's line was compared. The variable name in the message is no key either: that
             // DXC names the FIRST global with an initializer in every one of these warnings.

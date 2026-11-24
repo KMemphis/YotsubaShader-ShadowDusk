@@ -31,7 +31,7 @@ internal sealed class JsDxcShaderCompiler : IDxcShaderCompiler
         {
             // One-time load of registration (both the shadowdusk-dxc and
             // shadowdusk-spirv-cross [JSImport] modules — zero consumer wiring) + the
-            // heavy ~17.4 MB DXC WASM. Awaited HERE, lazily, so the download is never
+            // heavy ~19 MB DXC WASM. Awaited HERE, lazily, so the download is never
             // forced at page init (keeping the mode-1 boot instant). Idempotent. This is
             // the ONLY genuinely-async step; the compile itself is the synchronous core
             // below (issue #28) — so async and sync output is identical by construction.
@@ -56,6 +56,18 @@ internal sealed class JsDxcShaderCompiler : IDxcShaderCompiler
         DxcCompileRequest request,
         CancellationToken cancellationToken = default)
     {
+        // The same language-version rule as the desktop DxcShaderCompiler (Phase 70).
+        Result<PlatformBlob, ShaderError> result = CompileAt(request, DxcLanguageVersion.For(request.Platform), cancellationToken);
+        return result.IsSuccess || !DxcLanguageVersion.MayRetryAsLegacy(request, result.Error)
+            ? result
+            : DxcLanguageVersion.AfterLegacyRetry(result.Error, CompileAt(request, DxcLanguageVersion.Legacy, cancellationToken));
+    }
+
+    private Result<PlatformBlob, ShaderError> CompileAt(
+        DxcCompileRequest request,
+        string languageVersion,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
 
         if (!WasmCompilerInitialization.DxcReady)
@@ -70,15 +82,16 @@ internal sealed class JsDxcShaderCompiler : IDxcShaderCompiler
             request.Stage,
             request.EntryPoint,
             request.Macros,
-            request.Options);
+            request.Options,
+            languageVersion);
 
         // An entry function declared more than once crashes the desktop DXC's SPIR-V back end, so
         // the desktop host blanks its redundant prototypes, proven by DXC's own preprocessor (-P;
         // DxcSpirvEntryRedeclarations). The browser's DXC module exports no preprocess-only entry
         // point (compileToSpirv returns the object blob only), so it cannot prove that edit and
-        // does not make it: the source is compiled exactly as written. Its DXC build does not crash
-        // on a redeclared entry; it fails the compile ("generated SPIR-V is invalid: 2 Entry points
-        // cannot share the same name"), which is relabelled SD0236 below with DXC's text kept.
+        // does not make it: the source is compiled exactly as written. The v1.9.2607 module compiles
+        // a redeclared entry; the v1.7.2212 one failed it ("generated SPIR-V is invalid: 2 Entry
+        // points cannot share the same name"), and that text is still relabelled SD0236 below.
         //
         // The desktop's refusal of a '#pragma pack_matrix' argument DXC rejects (issue #452,
         // SD0241) applies here too, so both hosts answer the same.
@@ -246,7 +259,7 @@ internal static partial class DxcInterop
     /// DXC→WASM). The host must <c>await</c> this once before the first
     /// <see cref="CompileToSpirv"/>; it is idempotent and resolves immediately once
     /// loaded. Awaiting it here (rather than blocking the module's evaluation) keeps the
-    /// ~17.4 MB WASM off the page-init critical path so the mode-1 render boots instantly.
+    /// ~19 MB WASM off the page-init critical path so the mode-1 render boots instantly.
     /// JS contract: <c>ensureReady(): Promise&lt;void&gt;</c> (rejects on load failure).
     /// </summary>
     [JSImport("ensureReady", "shadowdusk-dxc")]

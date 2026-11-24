@@ -114,6 +114,19 @@ public sealed class ShaderConverterTests
     }
 
     [Fact]
+    public void WithoutTheShaderToyPackage_NoGlslFrontendIsFound()
+    {
+        // This test assembly does not reference ShadowDusk.ShaderToy: the package-absent half
+        // of issue #473. (ShaderConverterFrontendRouteTests in the integration tests, which do
+        // reference it, is the package-present half.) Find looks for the package and must
+        // come back empty, not throw.
+        ShaderFrontends.Find(ShaderFormat.Glsl).ShouldBeNull();
+        ShaderFrontends.Find(ShaderFormat.Glsl).ShouldBeNull();
+        ShaderConverter.CanConvert(ShaderToySource).ShouldBeFalse();
+        ShaderConverter.CanCompile(ShaderToySource).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Compile_GlslInput_NamesTheShaderToyPackage()
     {
         var result = ShaderConverter.Compile(new EffectCompiler(), ShaderToySource, new CompilerOptions(), "toy.glsl");
@@ -122,6 +135,22 @@ public sealed class ShaderConverterTests
         error.Kind.ShouldBe(ShaderErrorKind.UnsupportedInput);
         error.File.ShouldBe("toy.glsl");
         error.Message.ShouldContain("ShadowDusk.ShaderToy", Case.Sensitive);
+    }
+
+    [Fact]
+    public void WithoutTheSkSLPackage_SkslInputIsUnsupported_AndNamesThePackage()
+    {
+        // This test assembly does not reference ShadowDusk.SkSL (issue #506, package-absent half).
+        const string sksl = "half4 main(float2 c) { return half4(c, 0, 1); }";
+
+        ShaderFrontends.Find(ShaderFormat.Sksl).ShouldBeNull();
+        ShaderConverter.CanCompile(sksl, "x.sksl").ShouldBeFalse();
+
+        var result = ShaderConverter.Compile(new EffectCompiler(), sksl, new CompilerOptions(), "x.sksl");
+        ShaderError error = result.Error.Single();
+        error.Kind.ShouldBe(ShaderErrorKind.UnsupportedInput);
+        error.Code.ShouldBe(ShaderConverter.UnsupportedInputCode);
+        error.Message.ShouldContain("ShadowDusk.SkSL", Case.Sensitive);
     }
 
     [Fact]

@@ -21,7 +21,7 @@
 # The script exits non-zero on any wrong or missing verdict, so a mismatch fails the job.
 #
 # The x86_64 natives the emulator needs are restored by tools/restore.sh (SHA-256 pinned): DXC
-# from the native-dxc-android-1.7.2212.40-16k release, SPIRV-Cross from native-spirv-cross-android-d8e3e2b1; their GNU build ids are the android-x64 pins
+# from the native-dxc-1.9.2607 release, SPIRV-Cross from native-spirv-cross-android-d8e3e2b1; their GNU build ids are the android-x64 pins
 # in DxcNativeIdentity / SpvcLoader, so scenario 1 also proves the hosted files ARE the pinned
 # builds.
 #
@@ -33,6 +33,9 @@ name: Android emulator
 
 on:
   workflow_dispatch:
+  # Also callable: release.yml runs this as a gate before publishing (issue #483). In a called
+  # workflow `github.workflow` is the CALLER's name, so the concurrency group below is a literal.
+  workflow_call:
   schedule:
     - cron: '17 5 * * 1'   # Mondays 05:17 UTC
   push:
@@ -77,7 +80,7 @@ jobs:
        (github.event.action != 'labeled' || github.event.label.name == 'run-android'))
     # Job-level, so a run whose job is skipped (another label added) never cancels a live one.
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
+      group: Android emulator-${{ github.ref }}
       cancel-in-progress: true
     timeout-minutes: 60
     steps:
@@ -104,6 +107,16 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
+
+      # The runner image also carries newer SDKs, and with no global.json the newest one
+      # runs. On 2026-11-14 that became .NET 11, whose Android workload refuses this lane's
+      # net9.0-android target (NETSDK1202, out of support) and no longer matches its lock
+      # file. Pin the job to the .NET 10 SDK set up above, before the workload install, so
+      # the workload is the .NET 10 band's too.
+      - name: Pin the .NET 10 SDK for this job
+        run: |
+          dotnet new globaljson --sdk-version 10.0.100 --roll-forward latestFeature --force
+          dotnet --version
 
       - name: Install the .NET Android workload
         run: dotnet workload install android

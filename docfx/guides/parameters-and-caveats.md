@@ -23,19 +23,57 @@ float FishEyeAmount = 0.35;
 
 …carries `0.35` into the `.mgfx` (and `.knifx`) as the parameter's default value, on every target. The effect has that value the moment you load it, before any `SetValue`. DXC drops the initializer, so ShadowDusk reads it from your source (after macros, `#if` and any defines are applied) and writes it into the file itself.
 
-This is deliberately **better than `mgfxc`**, not the same: `mgfxc`'s OpenGL build stores zero for every initializer, and its DirectX 11 build loses array elements and half of a `float2x2`. ShadowDusk keeps scalars, vectors, matrices, `int`, `bool` and every element of an array.
+This is deliberately **better than `mgfxc`**, not the same: `mgfxc`'s OpenGL build stores zero for every initializer, and its DirectX 11 build loses array elements and half of a `float2x2`. ShadowDusk keeps scalars, vectors, matrices, `int`, `bool` and every element of an array. On FNA, a non-symmetric column-major matrix default reads as its transpose, with `fxc`'s build too; ShadowDusk warns `SD0306`, and calling `SetValue(Matrix)` after loading gives the declared value.
 
 ShadowDusk evaluates literals, arithmetic, casts, constructors such as `float4(1, 0, 0, 1)`, brace lists, arrays, earlier `const` values and a few math functions. If an initializer is something else (a call to your own function, say), the compile still succeeds and warns with `SD0017` naming the variable; its default is then zero until you `SetValue` it. Setting parameters by name at runtime always works.
 
+## Annotations as shader UI metadata
+
+An HLSL annotation can describe a parameter to a tool, such as a property grid that builds a labeled slider:
+
+```hlsl
+float Speed < string UIName = "Speed"; string UIGroup = "Motion"; float UIMin = 0; float UIMax = 5; float UIStep = 0.1; > = 1.0;
+```
+
+Read them from the compile result, because **the game cannot read them at runtime**. `.mgfx` and `.knifx` files carry no annotations, the same as `mgfxc`'s:
+
+```csharp
+var result = await new EffectCompiler().CompileAsync(source, options);
+ParameterReflection speed = result.Value.Parameters.Single(p => p.Name == "Speed");
+
+string? Note(string name) => speed.Annotations?.FirstOrDefault(a => a.Name == name)?.Value;
+
+string label = Note("UIName")?.Trim('"') ?? speed.Name;
+float max = float.Parse(Note("UIMax") ?? "1", CultureInfo.InvariantCulture);
+```
+
+Each `Value` is the text from your source: a string keeps its quotes and a number is not parsed. ShadowDusk does not interpret the names, so these are a suggested convention:
+
+| Annotation | Type | Meaning |
+|---|---|---|
+| `UIName` | `string` | Display name |
+| `UIGroup` | `string` | Group or section in the property grid |
+| `UIMin`, `UIMax` | number | Allowed range |
+| `UIStep` | number | Slider or spinner increment |
+| `UIWidget` | `string` | Control to use, such as `"Color"` or `"Slider"` |
+
+What is reported depends on where the annotation is written and on the target:
+
+| Annotation on | `mgfxc` | `CompiledShader.Parameters` |
+|---|---|---|
+| Numeric parameter | Accepted | Reported on OpenGL, DirectX 11, DirectX 12, Vulkan and KNIFX. **Not reported on FNA.** |
+| `texture` | Accepted | Compiles, not reported |
+| Sampler, technique or pass | **Rejected** | Not portable, so avoid them. A sampler annotation before the `=` also fails with `SD0016` on OpenGL, DirectX 12 and Vulkan. |
+
+On FNA, `fxc` writes annotations into the `.fxb` and `EffectParameter.Annotations` can read them. ShadowDusk's `.fxb` has none, so a game that reads annotations at runtime needs `fxc`'s build for now.
+
 ## Advanced texture intrinsics compile on Windows only (for now)
 
-A small family of advanced **OpenGL-target** texture intrinsics — **3D-texture sampling (`tex3D`), explicit-LOD sampling (the `tex2Dlod` family), and gradient sampling (the `tex2Dgrad` family)** — currently compiles on the Windows DXC native but **fails to compile on the Linux/macOS DXC builds**, even though all hosts pin the same DXC version. If your `.fx` uses these and you compile on Linux/macOS, expect a compile error (a loud diagnostic, never a miscompile); compiling the same shader on Windows works. The ordinary texture corpus (`tex2D`, multi-texture, samplers, render targets, …) is unaffected and compiles identically on all three OSes. This per-OS divergence is a known, tracked gap under investigation — it will be fixed in the compiler, not papered over here.
+A small family of advanced **OpenGL-target** texture intrinsics — **3D-texture sampling (`tex3D`), explicit-LOD sampling (the `tex2Dlod` family), and gradient sampling (the `tex2Dgrad` family)** — compiled on the Windows DXC native but **failed to compile on the Linux/macOS DXC builds** when last measured, on the earlier v1.7.2212 DXC (not yet re-measured on the v1.9.2607 pin, where every host runs a build of the same DXC tag). If your `.fx` uses these and you compile on Linux/macOS, expect a compile error (a loud diagnostic, never a miscompile); compiling the same shader on Windows works. The ordinary texture corpus (`tex2D`, multi-texture, samplers, render targets, …) is unaffected and compiles identically on all three OSes. This per-OS divergence is a known, tracked gap under investigation — it will be fixed in the compiler, not papered over here.
 
-## DirectX 12 must be compiled on Windows (for now)
+## DirectX 12 compiles on every host
 
-DXC's DXIL validation-and-signing step runs through `dxil.dll`, which is **Windows-only**. A `DirectX12` compile on Linux or macOS therefore emits **unsigned DXIL**: it loads only with Windows Developer Mode enabled, and **retail D3D12 rejects it at pipeline-state creation**.
-
-DirectX 12 DXIL is signed on every host (the retired `SD0214` warned about the old unsigned output), so there is no host to avoid. See [DirectX 12](../backends/directx12.md).
+DXC's signing step uses `dxil.dll`, which exists only on Windows. On Linux and macOS, ShadowDusk writes the same DXIL container hash in managed code, so DirectX 12 output is signed on every host (the retired `SD0214` warned about the old unsigned output). See [DirectX 12](../backends/directx12.md).
 
 ## Vertex-stage texture fetch is rejected on the OpenGL target
 
@@ -130,7 +168,7 @@ Two **opt-in, experimental** newer containers are available for consumers target
 
 - **MGFX v11** — set <xref:ShadowDusk.Core.CompilerOptions.MgfxVersion> `= 11` (CLI `--mgfx-version 11`). A faithful MonoGame v11 container for **MonoGame 3.8.5+**. v11 adds two per-shader diagnostic strings (the source file + entry point, used only in shader error messages, MonoGame PR #8813); it renders identically to v10. The source-file string is <xref:ShadowDusk.Core.CompilerOptions.SourceFileName> exactly as you pass it (what `mgfxc` does with its own argument), so an absolute path ends up in the effect; set <xref:ShadowDusk.Core.CompilerOptions.EmbeddedSourceFileName> to store a different string while diagnostics keep the real path. ShadowDusk's MGCB plugin and Content Builder processor store `<unknown>`, as MonoGame's stock processor does. DirectX 12 and Vulkan are always v11, so this applies to them without any opt-in. Render-proven in real MonoGame 3.8.5. *(v11 stays opt-in: v10 loads in every MonoGame from 3.8.1.263 onward and in KNI, whereas v11 requires 3.8.5+.)*
 - **KNIFX v11** — set <xref:ShadowDusk.Core.CompilerOptions.Container> `= EffectContainer.Knifx`. KNI's newer KNIFX container for **KNI v4.02+**, render-proven in real KNI v4.2.9001. `MgfxVersion` is ignored when `Container == Knifx`; `Container` is ignored for the `Fna` target (always D3D9 fx_2_0).
-- **KNIFX v12** — use <xref:ShadowDusk.Core.CapabilityProfile.KniGL_4_03> (CLI `--target-runtime kni-knifx-v12`). The same KNIFX body under container version 12, for **KNI 4.3.x only** (4.2.x rejects it); it avoids KNI 4.3's "older version" warning on v11. Render-proven in real KNI 4.3.9001.
+- **KNIFX v12** — use <xref:ShadowDusk.Core.CapabilityProfile.KniGL_4_03> (CLI `--target-runtime kni-knifx-v12`). The same KNIFX body under container version 12, for **KNI 4.3.x only** (4.2.x rejects it); it avoids KNI 4.3's "older version" warning on v11. Render-proven in real KNI 4.3.9001. At runtime, `RuntimeProfileDetector.RecommendKnifx(typeof(Game).Assembly)` chooses between v11 and v12 from the loaded KNI's version.
   One parameter difference follows KNI's own pipeline: in `.knifx` a legacy sampler that binds no texture (`sampler s0;`, `sampler2D S : register(s0);`, or a `sampler_state` without `Texture =`) is **no effect parameter**, so `effect.Parameters["s0"]` is `null`. Bind the texture through the device (`GraphicsDevice.Textures[n] = texture`; SpriteBatch already binds unit 0), or declare the texture in the `.fx` (`Texture2D Tex; sampler2D s0 = sampler_state { Texture = (Tex); };`) and set `Parameters["Tex"]`, which works in both containers. The default MGFX v10 container keeps `mgfxc`'s parameter named after the sampler.
 
 To pick a whole target (backend + container) with one value instead of setting these separately, set `CompilerOptions.Profile` to a `CapabilityProfile` (e.g. `CapabilityProfile.KniGL_4_02`), or use the CLI `--target-runtime` flag — a profile overrides `Target` / `Container` / `MgfxVersion`. See [Choosing a Target](choosing-a-target.md).

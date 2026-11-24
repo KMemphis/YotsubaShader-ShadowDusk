@@ -6,12 +6,13 @@
 
 .DESCRIPTION
   ShadowDusk's real product bar is "loads + renders like the reference compiler in the REAL
-  engine" (CLAUDE.md -> "The pre-merge bar has TWO halves"). The OpenGL render gates
-  now run in CI on Linux via Mesa llvmpipe (`.github/workflows/validation-render.yml`), but the
-  DirectX / DirectX12 / FNA / KNI-DirectX render proofs have NO headless software driver we can
-  run on a GitHub runner (Mesa is GL-only; a verified headless D3D/WARP story does not exist
-  yet). So those gates can only run on a real Windows box with a DX12-capable GPU (Vulkan-capable
-  too, unless -SkipVulkan) - which means the DEVELOPER'S
+  engine" (CLAUDE.md -> "The pre-merge bar has TWO halves"). CI runs many of these gates on
+  software rasterizers (`.github/workflows/validation-render.yml`: OpenGL on Mesa llvmpipe,
+  DirectX 11 and 12 on WARP, Vulkan on Mesa lavapipe), but no CI run uses a GPU driver, and some
+  gates have no CI run at all (the DX12 VS-driven gallery, FNA, real KNI desktop GL, the MGCB,
+  XNB and Content Builder gates, the ANGLE probe; docs/validation-matrix.md section 6 is the
+  list). So the full set can only run on a real Windows box with a DX12-capable GPU
+  (Vulkan-capable too, unless -SkipVulkan) - which means the DEVELOPER'S
   machine is the gate, and it must be run BEFORE a release (and before merging any change that
   touches shader output / transpilation / the MGFX-FNA writers / render state / matrix handling).
 
@@ -58,8 +59,8 @@
                                    MonoGame 3.8.5 WindowsDX12, maxd 0).
     * DirectX12 VS-driven + Apos.Shapes gallery - validation/VsDrivenDx12 (+ `-- apos`): the VS rig
                                    vs the real mgfxc DirectX_12 golden (maxd 0); the gallery vs the
-                                   same local golden at tol 1 (11 pixels of 402,984 at 1/255,
-                                   root-caused 2026-07-31 to the pinned DXC build - ours is
+                                   same local golden at tol 1 (maxd 0 since the v1.9.2607 DXC pin;
+                                   on the old pin 11 pixels of 402,984 at 1/255, root-caused 2026-07-31 to the then-pinned DXC - ours was
                                    dxcoob 1.7.2212.40, the golden's is MonoGame 3.8.5's bundled
                                    dxcoob 1.8.2505.32 - NOT a ShadowDusk defect; see
                                    docs/validation-matrix.md section 7).
@@ -99,7 +100,9 @@
                                    plus 30 matrix-interpolant packing fixtures whose stages declare
                                    the interpolant differently (column_major and row_major, 3x3 /
                                    4x3 / 3x4 / 2x2). Controls that must diverge: a relabelled
-                                   BINORMAL0 record, two row_major fixtures packed by columns, a split float1x4 in one register.
+                                   BINORMAL0 record, two row_major fixtures packed by columns, a split float1x4 in one register,
+                                   and, on a Mesa or Apple compatibility context, the integer-dialect case with its
+                                   prelude blanked, which must be refused.
                                    The non-square packing cases render and match on every driver,
                                    strict ones (Mesa/Apple/ANGLE) included, since issue #453 holds
                                    their GLSL as zero-padded square matN; a compile that still
@@ -276,8 +279,9 @@ Set-Location $repoRoot
 
 Write-Host "=== ShadowDusk Windows-GPU render gates (the CI-can't-run bar) ===" -ForegroundColor Cyan
 Write-Host "repo: $repoRoot"
-Write-Host "These gates render in a real DX11 / FNA / KNI-DX engine and compare to the reference"
-Write-Host "compiler. CI has no headless driver for them, so this local run is the release gate.`n"
+Write-Host "These gates render in the real engines on this machine's GPU drivers and compare to the"
+Write-Host "reference compiler. CI runs only part of them, on software rasterizers, so this local run"
+Write-Host "is the release gate.`n"
 
 # Restore the vkd3d-shader native the DX/KNI-DX/FNA gates need (idempotent; SHA-256-verified).
 if (-not $SkipRestore) {
@@ -390,6 +394,18 @@ $gates.Add(@{
     Action = {
         $env:SHADOWDUSK_REQUIRE_GL = '1'
         try { Invoke-Checked 'dotnet' @('run', '--project', 'validation/SkiaVsKni', '-c', 'Release') }
+        finally { Remove-Item Env:SHADOWDUSK_REQUIRE_GL -ErrorAction SilentlyContinue }
+    }
+})
+# SkSL INPUT frontend (ShadowDusk.SkSL): the same SkSL rendered by real SkiaSharp and, converted and
+# compiled for OpenGL, by a real MonoGame DesktopGL Effect (image fidelity vs Skia, tol 2/255;
+# non-square, premultiplied and straight-alpha techniques, drawn with SpriteBatch; eight positive
+# controls; every case is also compiled for DirectX 11, DirectX 12, Vulkan and FNA, compile only).
+$gates.Add(@{
+    Name   = 'SkSL vs GL (ShadowDusk.SkSL input: real SkiaSharp vs OpenGL in real MonoGame DesktopGL, tol 2/255)'
+    Action = {
+        $env:SHADOWDUSK_REQUIRE_GL = '1'
+        try { Invoke-Checked 'dotnet' @('run', '--project', 'validation/SkSLVsGl', '-c', 'Release') }
         finally { Remove-Item Env:SHADOWDUSK_REQUIRE_GL -ErrorAction SilentlyContinue }
     }
 })
@@ -526,7 +542,7 @@ $gates.Add(@{
 # own nkast package set: real KNI ContentManager.Load<Effect> on the v10 and KNIFX .xnb vs the
 # mgcb payload (maxd 0), plus the pinned positive control that stock mgcb output is REJECTED on
 # 4.2 and loads on 4.3. Default ON: the KNI failure mode is silent for a consumer until their
-# game refuses to start, and CI has no KNI runtime.
+# game refuses to start, and CI does not run this driver.
 $gates.Add(@{
     Name   = 'XNB on KNI 4.2.9001 + 4.3.9001 (Phase 64: real KNI Content.Load<Effect> on a ShadowDusk-written .xnb, v10 + KNIFX vs mgcb payload; stock-mgcb rejection on 4.2 pinned)'
     Action = {
@@ -788,6 +804,7 @@ foreach ($gate in $gates) {
     Write-Host "===== GATE: $($gate.Name) =====" -ForegroundColor Cyan
     $ok = $true
     $err = $null
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         & $gate.Action
     } catch {
@@ -795,7 +812,9 @@ foreach ($gate in $gates) {
         $err = $_.Exception.Message
         Write-Host "GATE FAILED: $err" -ForegroundColor Red
     }
-    $results.Add([pscustomobject]@{ Name = $gate.Name; Pass = $ok; Error = $err })
+    $clock.Stop()
+    Write-Host ("gate time: {0:mm\:ss}" -f $clock.Elapsed) -ForegroundColor DarkGray
+    $results.Add([pscustomobject]@{ Name = $gate.Name; Pass = $ok; Error = $err; Elapsed = $clock.Elapsed })
     Write-Host ""
 }
 
@@ -803,14 +822,15 @@ Write-Host "================ SUMMARY ================" -ForegroundColor Cyan
 $failed = 0
 foreach ($r in $results) {
     if ($r.Pass) {
-        Write-Host ("  [PASS] {0}" -f $r.Name) -ForegroundColor Green
+        Write-Host ("  [PASS] {0:mm\:ss}  {1}" -f $r.Elapsed, $r.Name) -ForegroundColor Green
     } else {
         $failed++
-        Write-Host ("  [FAIL] {0}  ({1})" -f $r.Name, $r.Error) -ForegroundColor Red
+        Write-Host ("  [FAIL] {0:mm\:ss}  {1}  ({2})" -f $r.Elapsed, $r.Name, $r.Error) -ForegroundColor Red
     }
 }
 $passed = $results.Count - $failed
-Write-Host ("`n{0}/{1} render gates passed." -f $passed, $results.Count)
+$total = [TimeSpan]::FromTicks(($results | ForEach-Object { $_.Elapsed.Ticks } | Measure-Object -Sum).Sum)
+Write-Host ("`n{0}/{1} render gates passed in {2:hh\:mm\:ss}." -f $passed, $results.Count, $total)
 if (-not $IncludeFna) {
     Write-Host "(FNA gate skipped - rerun with -IncludeFna before an FNA-affecting release.)" -ForegroundColor Yellow
 }

@@ -52,6 +52,11 @@
 #                              SDL2.GL, untinted and tinted, tol 2/255, three positive controls
 #                              that must diverge. Single process; the KNI arm needs the GL context.
 #                              With RaylibRoute, the only gates that drive a non-MonoGame runtime.
+#   * SkSLVsGl               — the SkSL INPUT frontend (ShadowDusk.SkSL): the same SkSL in REAL
+#                              SkiaSharp vs converted + built for OpenGL in REAL MonoGame
+#                              DesktopGL, non-square, premultiplied and straight-alpha techniques,
+#                              drawn with SpriteBatch, tol 2/255, eight positive controls that
+#                              must diverge; each case also compiled (only) for DX11/DX12/Vulkan/FNA.
 #   * VertexSemanticsGl / VertexSemanticsKniGl — vertex inputs beyond POSITION/COLOR/
 #                              TEXCOORD/NORMAL (BINORMAL, TANGENT, BLENDINDICES as Byte4,
 #                              BLENDWEIGHT 0+1, PSIZE, FOG, DEPTH, TEXCOORD3) and a float3x3
@@ -60,9 +65,11 @@
 #                              render vs the committed mgfxc OpenGL build in the same process
 #                              (maxd <= 1) AND the element's CPU-known value; 30 matrix-
 #                              interpolant packing fixtures whose stages declare it differently
-#                              (column_major / row_major, square and non-square) vs mgfxc; four
+#                              (column_major / row_major, square and non-square) vs mgfxc; five
 #                              positive controls that must diverge (a relabelled BINORMAL0
-#                              record, two row_major fixtures packed by columns, a split float1x4 in one register). Every
+#                              record, two row_major fixtures packed by columns, a split float1x4 in one register,
+#                              and, on a Mesa or Apple compatibility context, the integer-dialect case with its
+#                              prelude blanked, which must be refused). Every
 #                              case must render and pass on every driver, strict llvmpipe
 #                              included: since issue #453 the non-square cases' GLSL holds a
 #                              zero-padded square matN (it used to be refused there, SD0403), a
@@ -280,6 +287,7 @@ jobs:
           dotnet build validation/ShaderToyRouteGl/ShaderToyRouteGl.csproj -c Release
           dotnet build validation/RaylibRoute/RaylibRoute.csproj -c Release
           dotnet build validation/SkiaVsKni/SkiaVsKni.csproj -c Release
+          dotnet build validation/SkSLVsGl/SkSLVsGl.csproj -c Release
           dotnet build validation/InitializerDefaultsGl/InitializerDefaultsGl.csproj -c Release
           dotnet build validation/InitializerDefaultsKniGl/InitializerDefaultsKniGl.csproj -c Release
           dotnet build validation/VertexSemanticsGl/VertexSemanticsGl.csproj -c Release
@@ -295,13 +303,13 @@ jobs:
           # No GL context => hard FAIL, never a pass-by-skip. StateFidelity/CbufferModel/
           # ReservedWordGl throw on a missing device (MonoGame NoSuitableGraphicsDevice ->
           # natural red); TextureBreadthValidation, SamplerPairsGl, SamplerRegisterOrderGl,
-          # DeferredSpriteMrtGl, ShaderToyRouteGl, RaylibRoute and SkiaVsKni catch+skip, so this flag
-          # turns their skip into a failure too (all seven read SHADOWDUSK_REQUIRE_GL).
+          # DeferredSpriteMrtGl, ShaderToyRouteGl, RaylibRoute, SkiaVsKni and SkSLVsGl catch+skip, so
+          # this flag turns their skip into a failure too (all eight read SHADOWDUSK_REQUIRE_GL).
           SHADOWDUSK_REQUIRE_GL: "1"
         run: |
           set +e
           rc=0
-          for proj in StateFidelity CbufferModel TextureBreadthValidation ReservedWordGl SamplerPairsGl SamplerRegisterOrderGl DeferredSpriteMrtGl ShaderToyRouteGl RaylibRoute SkiaVsKni InitializerDefaultsGl InitializerDefaultsKniGl VertexSemanticsGl VertexSemanticsKniGl; do
+          for proj in StateFidelity CbufferModel TextureBreadthValidation ReservedWordGl SamplerPairsGl SamplerRegisterOrderGl DeferredSpriteMrtGl ShaderToyRouteGl RaylibRoute SkiaVsKni SkSLVsGl InitializerDefaultsGl InitializerDefaultsKniGl VertexSemanticsGl VertexSemanticsKniGl; do
             echo "::group::$proj"
             xvfb-run -a dotnet run --project "validation/$proj" -c Release --no-build
             this=$?
@@ -433,6 +441,7 @@ jobs:
             validation/output-shadertoy/**
             validation/output-raylib/**
             validation/output-skia-kni/**
+            validation/output-sksl/**
             validation/output/baseline/**
             validation/output/candidate/**
             validation/output/diff/**
